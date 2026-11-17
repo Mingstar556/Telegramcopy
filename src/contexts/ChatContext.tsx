@@ -1,0 +1,578 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { api } from '../services/api';
+import { wsService } from '../services/websocket';
+import { ChatConversation, ChatMessage, OutgoingBackendPayload, StickerItem } from '../types/chat';
+import { useAuth } from './AuthContext';
+
+interface ChatContextValue {
+  conversations: ChatConversation[];
+  archivedConversations: ChatConversation[];
+  activeChat: ChatConversation | null;
+  activeMessages: ChatMessage[];
+  isLoading: boolean;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  selectChat: (chatId: string) => void;
+  sendMessage: (text: string) => Promise<void>;
+  sendSticker: (sticker: StickerItem) => Promise<void>;
+  sendMedia: (type: 'photo' | 'video' | 'voice', fileOrUrl: File | string, duration?: number) => Promise<void>;
+  archiveChat: (chatId: string, archive?: boolean) => void;
+  createGroup: (name: string, category: string, memberIds: string[]) => void;
+  saveMessageToSaved: (message: ChatMessage) => void;
+  openSpecialChat: () => void;
+  openSavedMessages: () => void;
+  refreshChats: () => Promise<void>;
+  isSpecialChatOpen: boolean;
+  setIsSpecialChatOpen: (open: boolean) => void;
+  selectedCategory: string | null;
+  setSelectedCategory: (cat: string | null) => void;
+  categories: string[];
+}
+
+const ChatContext = createContext<ChatContextValue | undefined>(undefined);
+
+export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { account, token, isAuthenticated } = useAuth();
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isSpecialChatOpen, setIsSpecialChatOpen] = useState<boolean>(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  // Load conversations when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !account?.userId) {
+      setConversations([]);
+      setActiveChatId(null);
+      setMessagesByChat({});
+      return;
+    }
+
+    const loadConversations = async () => {
+      setIsLoading(true);
+      try {
+        const chats = await api.fetchConversations(account.userId, token || undefined);
+        setConversations(chats);
+        // Default select first chat on wide screens
+        if (chats.length > 0 && !activeChatId && window.innerWidth >= 768) {
+          setActiveChatId(chats[0].id);
+        }
+      } catch (err) {
+        console.error('Failed to load chats:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadConversations();
+  }, [isAuthenticated, account?.userId, token]);
+
+  // Load messages when active chat changes
+  useEffect(() => {
+    if (!activeChatId || !account?.userId) return;
+
+    if (!messagesByChat[activeChatId]) {
+      api.fetchMessages(account.userId, activeChatId, token || undefined)
+        .then(msgs => {
+          setMessagesByChat(prev => ({ ...prev, [activeChatId]: msgs }));
+        })
+        .catch(err => {
+          console.error('Failed to load messages for chat', activeChatId, err);
+        });
+    }
+  }, [activeChatId, account?.userId, token, messagesByChat]);
+
+  // Listen to incoming real-time WebSocket messages from Django Channels
+  useEffect(() => {
+    const unsubscribe = wsService.onMessage((incomingMsg) => {
+      const chatId = incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId;
+
+      setMessagesByChat(prev => ({
+        ...prev,
+        [chatId]: [...(prev[chatId] || []), incomingMsg]
+      }));
+
+      // Update last message in conversation list
+      setConversations(prev => {
+        const existingIndex = prev.findIndex(c => c.id === chatId);
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          const conv = { ...updated[existingIndex] };
+          conv.lastMessage = incomingMsg;
+          if (activeChatId !== chatId && !incomingMsg.isOutgoing) {
+            conv.unreadCount = (conv.unreadCount || 0) + 1;
+          }
+          updated.splice(existingIndex, 1);
+          return [conv, ...updated];
+        }
+        return prev;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeChatId]);
+
+  const selectChat = (chatId: string) => {
+    setActiveChatId(chatId);
+    // Mark as read in local conversation state
+    setConversations(prev =>
+      prev.map(c => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
+    );
+  };
+
+  const openSpecialChat = () => {
+    const specialId = 'special_direct_bot';
+    const found = conversations.find(c => c.id === specialId);
+    if (found) {
+      selectChat(specialId);
+    } else {
+      // Create if not existing
+      const specialConv: ChatConversation = {
+        id: specialId,
+        user: {
+          id: specialId,
+          username: 'special_direct',
+          firstName: 'Special Channel',
+          lastName: '⚡',
+          isBot: true,
+          online: true
+        },
+        unreadCount: 0,
+        isPinned: true
+      };
+      setConversations(prev => [specialConv, ...prev]);
+      selectChat(specialId);
+    }
+    setIsSpecialChatOpen(false);
+  };
+
+  const openSavedMessages = () => {
+    const savedId = 'saved_messages';
+    const found = conversations.find(c => c.id === savedId);
+    if (found) {
+      selectChat(savedId);
+    } else {
+      const savedConv: ChatConversation = {
+        id: savedId,
+        user: {
+          id: savedId,
+          username: 'saved_messages',
+          firstName: 'Saved Messages',
+          lastName: '',
+          avatar: '',
+          online: true,
+          lastSeen: 'Cloud Storage'
+        },
+        unreadCount: 0,
+        isPinned: true,
+        isSavedMessages: true
+      };
+      setConversations(prev => [savedConv, ...prev]);
+      selectChat(savedId);
+    }
+  };
+
+  /**
+   * Swipe-to-archive functionality
+   */
+  const archiveChat = (chatId: string, archive = true) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === chatId ? { ...c, isArchived: archive } : c))
+    );
+    if (activeChatId === chatId && archive) {
+      // Switch active chat if current one is archived
+      const remaining = conversations.filter(c => c.id !== chatId && !c.isArchived);
+      if (remaining.length > 0 && window.innerWidth >= 768) {
+        setActiveChatId(remaining[0].id);
+      } else {
+        setActiveChatId(null);
+      }
+    }
+  };
+
+  /**
+   * Create a new Group Chat or Group Category
+   */
+  const createGroup = (name: string, category: string, members: string[]) => {
+    if (!name.trim() || !account?.userId) return;
+    const newGroupId = 'group_' + Date.now();
+    const groupName = name.trim();
+    const chosenCat = category.trim() || 'General';
+
+    const newGroupConv: ChatConversation = {
+      id: newGroupId,
+      user: {
+        id: newGroupId,
+        username: groupName.toLowerCase().replace(/\s+/g, '_'),
+        firstName: groupName,
+        lastName: '',
+        avatar: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80',
+        online: true,
+        lastSeen: `${members.length + 1} members`
+      },
+      isGroup: true,
+      category: chosenCat,
+      memberCount: members.length + 1,
+      unreadCount: 0,
+      lastMessage: {
+        id: 'msg_welcome_' + Date.now(),
+        senderId: account.userId,
+        senderName: account.botName,
+        toUser: newGroupId,
+        message: `Group created in category [${chosenCat}] with ${members.length} members.`,
+        timestamp: Date.now(),
+        isOutgoing: true,
+        status: 'read'
+      }
+    };
+
+    setConversations(prev => [newGroupConv, ...prev]);
+    setMessagesByChat(prev => ({
+      ...prev,
+      [newGroupId]: [
+        {
+          id: 'msg_sys_' + Date.now(),
+          senderId: account.userId,
+          senderName: 'System',
+          toUser: newGroupId,
+          message: `Group "${groupName}" was created by Employee Operator #${account.userId}. Category: ${chosenCat}`,
+          timestamp: Date.now(),
+          isOutgoing: true,
+          status: 'read'
+        }
+      ]
+    }));
+
+    selectChat(newGroupId);
+  };
+
+  /**
+   * Save a message to the "Saved Messages" chat
+   */
+  const saveMessageToSaved = (message: ChatMessage) => {
+    const savedId = 'saved_messages';
+    const savedMsg: ChatMessage = {
+      id: 'saved_' + Date.now(),
+      senderId: account?.userId || 'me',
+      senderName: account?.botName || 'You',
+      toUser: savedId,
+      message: message.message,
+      timestamp: Date.now(),
+      isOutgoing: true,
+      status: 'read',
+      action: message.action || 'send_message',
+      sticker: message.sticker,
+      media: message.media,
+      forwardedFrom: message.senderName || (message.isOutgoing ? 'You' : 'User')
+    };
+
+    setMessagesByChat(prev => ({
+      ...prev,
+      [savedId]: [...(prev[savedId] || []), savedMsg]
+    }));
+
+    // Update last message in Saved Messages
+    setConversations(prev =>
+      prev.map(c => (c.id === savedId ? { ...c, lastMessage: savedMsg } : c))
+    );
+  };
+
+  const refreshChats = async () => {
+    if (!account?.userId) return;
+    try {
+      const chats = await api.fetchConversations(account.userId, token || undefined);
+      setConversations(chats);
+    } catch (e) {
+      console.warn('Failed to refresh chats:', e);
+    }
+  };
+
+  /**
+   * Send a text message matching requirement 9:
+   * { "User-ID": ..., "to-user": ..., "message": ..., "action": ... }
+   */
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || !activeChatId || !account?.userId) return;
+
+    const currentChatId = activeChatId;
+    const msgId = 'msg_local_' + Date.now();
+
+    const newLocalMessage: ChatMessage = {
+      id: msgId,
+      senderId: account.userId,
+      senderName: account.botName,
+      toUser: currentChatId,
+      message: text.trim(),
+      timestamp: Date.now(),
+      isOutgoing: true,
+      status: 'pending',
+      action: 'send_message'
+    };
+
+    // Optimistically update message stream
+    setMessagesByChat(prev => ({
+      ...prev,
+      [currentChatId]: [...(prev[currentChatId] || []), newLocalMessage]
+    }));
+
+    // Update conversation snippet
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === currentChatId);
+      if (idx >= 0) {
+        const updated = [...prev];
+        const conv = { ...updated[idx], lastMessage: newLocalMessage };
+        updated.splice(idx, 1);
+        return [conv, ...updated];
+      }
+      return prev;
+    });
+
+    const payload: OutgoingBackendPayload = {
+      "User-ID": account.userId,
+      "to-user": currentChatId,
+      "message": text.trim(),
+      "action": "send_message"
+    };
+
+    try {
+      // 1. Try WebSocket send if live
+      const wsSent = wsService.send(payload);
+
+      // 2. Also send via REST API client for persistence / Django view
+      await api.sendMessage(payload, token || undefined);
+
+      // Mark status delivered
+      setMessagesByChat(prev => ({
+        ...prev,
+        [currentChatId]: (prev[currentChatId] || []).map(m =>
+          m.id === msgId ? { ...m, status: 'delivered' } : m
+        )
+      }));
+
+      // In mock mode, simulate automatic response from target user/client after 1.5s
+      if (api.isMockMode() && !wsSent) {
+        setTimeout(() => {
+          const simulatedReply: ChatMessage = {
+            id: 'mock_reply_' + Date.now(),
+            senderId: currentChatId,
+            toUser: account.userId,
+            message: `Received by client: "${text.slice(0, 25)}${text.length > 25 ? '...' : ''}"`,
+            timestamp: Date.now(),
+            isOutgoing: false,
+            status: 'read'
+          };
+
+          setMessagesByChat(prev => ({
+            ...prev,
+            [currentChatId]: [...(prev[currentChatId] || []), simulatedReply]
+          }));
+
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === currentChatId);
+            if (idx >= 0) {
+              const updated = [...prev];
+              const conv = { ...updated[idx], lastMessage: simulatedReply };
+              updated.splice(idx, 1);
+              return [conv, ...updated];
+            }
+            return prev;
+          });
+        }, 1200);
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    }
+  };
+
+  /**
+   * Send a pre-installed sticker
+   */
+  const sendSticker = async (sticker: StickerItem) => {
+    if (!activeChatId || !account?.userId) return;
+
+    const currentChatId = activeChatId;
+    const msgId = 'sticker_' + Date.now();
+
+    const newLocalStickerMsg: ChatMessage = {
+      id: msgId,
+      senderId: account.userId,
+      senderName: account.botName,
+      toUser: currentChatId,
+      message: `[Sticker: ${sticker.name}]`,
+      timestamp: Date.now(),
+      isOutgoing: true,
+      status: 'pending',
+      action: 'send_sticker',
+      sticker: {
+        id: sticker.id,
+        packId: sticker.packId,
+        url: '',
+        emoji: sticker.emoji,
+        name: sticker.name
+      }
+    };
+
+    setMessagesByChat(prev => ({
+      ...prev,
+      [currentChatId]: [...(prev[currentChatId] || []), newLocalStickerMsg]
+    }));
+
+    const payload: OutgoingBackendPayload = {
+      "User-ID": account.userId,
+      "to-user": currentChatId,
+      "message": `[Sticker: ${sticker.name}]`,
+      "action": "send_sticker",
+      "sticker": {
+        id: sticker.id,
+        packId: sticker.packId,
+        emoji: sticker.emoji
+      }
+    };
+
+    try {
+      wsService.send(payload);
+      await api.sendMessage(payload, token || undefined);
+
+      setMessagesByChat(prev => ({
+        ...prev,
+        [currentChatId]: (prev[currentChatId] || []).map(m =>
+          m.id === msgId ? { ...m, status: 'delivered' } : m
+        )
+      }));
+    } catch (e) {
+      console.error('Failed to send sticker:', e);
+    }
+  };
+
+  /**
+   * Send media (photo, video, voice note) matching backend requirements
+   */
+  const sendMedia = async (type: 'photo' | 'video' | 'voice', fileOrUrl: File | string, duration?: number) => {
+    if (!activeChatId || !account?.userId) return;
+
+    const currentChatId = activeChatId;
+    const msgId = 'media_' + Date.now();
+    const mediaUrl = typeof fileOrUrl === 'string' ? fileOrUrl : URL.createObjectURL(fileOrUrl);
+    const fileName = typeof fileOrUrl === 'string' ? undefined : fileOrUrl.name;
+
+    const newLocalMediaMsg: ChatMessage = {
+      id: msgId,
+      senderId: account.userId,
+      senderName: account.botName,
+      toUser: currentChatId,
+      message: type === 'voice' ? '[Voice Note]' : type === 'photo' ? '[Photo]' : '[Video]',
+      timestamp: Date.now(),
+      isOutgoing: true,
+      status: 'pending',
+      action: 'send_media',
+      media: {
+        type,
+        url: mediaUrl,
+        duration,
+        fileName
+      }
+    };
+
+    setMessagesByChat(prev => ({
+      ...prev,
+      [currentChatId]: [...(prev[currentChatId] || []), newLocalMediaMsg]
+    }));
+
+    // Update conversation snippet
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === currentChatId);
+      if (idx >= 0) {
+        const updated = [...prev];
+        const conv = { ...updated[idx], lastMessage: newLocalMediaMsg };
+        updated.splice(idx, 1);
+        return [conv, ...updated];
+      }
+      return prev;
+    });
+
+    const payload: OutgoingBackendPayload = {
+      "User-ID": account.userId,
+      "to-user": currentChatId,
+      "message": newLocalMediaMsg.message,
+      "action": "send_media",
+      "media": {
+        type,
+        url: mediaUrl,
+        duration,
+        fileName
+      }
+    };
+
+    try {
+      wsService.send(payload);
+      await api.sendMessage(payload, token || undefined);
+
+      setMessagesByChat(prev => ({
+        ...prev,
+        [currentChatId]: (prev[currentChatId] || []).map(m =>
+          m.id === msgId ? { ...m, status: 'delivered' } : m
+        )
+      }));
+    } catch (e) {
+      console.error('Failed to send media:', e);
+    }
+  };
+
+  const activeConversations = conversations.filter(c => !c.isArchived);
+  const archivedConversations = conversations.filter(c => !!c.isArchived);
+
+  // Extract unique group categories
+  const categories = Array.from(
+    new Set(
+      conversations
+        .filter(c => c.category)
+        .map(c => c.category as string)
+    )
+  );
+
+  const activeChat = conversations.find(c => c.id === activeChatId) || null;
+  const activeMessages = (activeChatId ? messagesByChat[activeChatId] : []) || [];
+
+  return (
+    <ChatContext.Provider
+      value={{
+        conversations: activeConversations,
+        archivedConversations,
+        activeChat,
+        activeMessages,
+        isLoading,
+        searchQuery,
+        setSearchQuery,
+        selectChat,
+        sendMessage,
+        sendSticker,
+        sendMedia,
+        archiveChat,
+        createGroup,
+        saveMessageToSaved,
+        openSpecialChat,
+        openSavedMessages,
+        refreshChats,
+        isSpecialChatOpen,
+        setIsSpecialChatOpen,
+        selectedCategory,
+        setSelectedCategory,
+        categories
+      }}
+    >
+      {children}
+    </ChatContext.Provider>
+  );
+};
+
+export const useChat = () => {
+  const context = useContext(ChatContext);
+  if (!context) {
+    throw new Error('useChat must be used within a ChatProvider');
+  }
+  return context;
+};

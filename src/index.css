@@ -1,0 +1,272 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-chat-font-size: 15px;
+  --tg-chat-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 1. SIMPLE BLACK THEME (Modern Minimal Obsidian) */
+.theme-simple-black {
+  --color-bg-base: #09090b;
+  --color-bg-sidebar: #0e0e11;
+  --color-bg-chat: #060608;
+  --color-bg-header: rgba(14, 14, 17, 0.82);
+  --color-bg-bubble-in: #16181d;
+  --color-bg-bubble-out: #22476b;
+  --color-bg-input: #121317;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-subtle: rgba(255, 255, 255, 0.04);
+  --color-accent: #2aabee;
+  --color-accent-hover: #38bdf8;
+  --color-accent-glow: rgba(42, 171, 238, 0.25);
+  --color-accent-text: #ffffff;
+  --color-text-main: #f4f4f5;
+  --color-text-muted: #828a99;
+  --color-unread-badge: #2aabee;
+  --color-active-item: rgba(255, 255, 255, 0.06);
+  --color-modal-bg: #121318;
+}
+
+/* 2. BLACK & GOLD THEME (Modern Stealth Luxury) */
+.theme-black-gold {
+  --color-bg-base: #050505;
+  --color-bg-sidebar: #090807;
+  --color-bg-chat: #020202;
+  --color-bg-header: rgba(12, 11, 8, 0.85);
+  --color-bg-bubble-in: #14120b;
+  --color-bg-bubble-out: #27200a;
+  --color-bg-input: #0e0d09;
+  --color-border: rgba(212, 175, 55, 0.18);
+  --color-border-subtle: rgba(212, 175, 55, 0.08);
+  --color-accent: #e5b842;
+  --color-accent-hover: #f3c853;
+  --color-accent-glow: rgba(229, 184, 66, 0.28);
+  --color-accent-text: #000000;
+  --color-text-main: #f7f4ec;
+  --color-text-muted: #9c927f;
+  --color-unread-badge: #e5b842;
+  --color-active-item: rgba(229, 184, 66, 0.09);
+  --color-modal-bg: #0e0d08;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100dvh;
+  overscroll-behavior-y: none;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-main);
+  font-family: var(--tg-chat-font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Subtle modern scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  transition: background 150ms ease;
+}
+
+.theme-black-gold ::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.18);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.theme-black-gold ::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.35);
+}
+
+/* Modern Ambient Wallpaper Backgrounds */
+.tg-wallpaper-doodles {
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(42, 171, 238, 0.04), transparent 45%),
+    radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 100% 100%, 24px 24px;
+  background-position: 0 0, 0 0;
+}
+
+.theme-black-gold .tg-wallpaper-doodles {
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(229, 184, 66, 0.06), transparent 50%),
+    radial-gradient(rgba(212, 175, 55, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 26px 26px;
+  background-position: 0 0, 0 0;
+}
+
+.tg-wallpaper-stars {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.theme-black-gold .tg-wallpaper-stars {
+  background-image: radial-gradient(rgba(212, 175, 55, 0.06) 1.2px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/* Glassmorphism utility */
+.glass-header {
+  background-color: var(--color-bg-header);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Gold glow */
+.gold-glow {
+  box-shadow: 0 0 16px rgba(229, 184, 66, 0.22);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(135deg, #FFFDF0 0%, #E5B842 50%, #B88B17 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Emil Kowalski Button Press Feedback */
+.btn-press {
+  transform: translate3d(0, 0, 0);
+  transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out);
+}
+
+.btn-press:active {
+  transform: scale(0.96) translate3d(0, 0, 0);
+}
+
+/* 
+  COMPOSITE-ONLY HARDWARE ACCELERATED ANIMATIONS 
+  Transforms & opacity only - 60 FPS, ultra low CPU/battery consumption
+*/
+
+@keyframes animeSquishBounce {
+  0% { transform: scale(1) translateY(0); }
+  25% { transform: scale(1.25, 0.8) translateY(3px) rotate(-3deg); }
+  50% { transform: scale(0.88, 1.22) translateY(-6px) rotate(3deg); }
+  75% { transform: scale(1.08, 0.95) translateY(1px) rotate(-1deg); }
+  100% { transform: scale(1) translateY(0) rotate(0deg); }
+}
+
+@keyframes animeStarBurst {
+  0% { transform: scale(0) rotate(-45deg); opacity: 0; }
+  50% { transform: scale(1.3) rotate(15deg); opacity: 1; }
+  100% { transform: scale(0.9) rotate(0deg); opacity: 0.8; }
+}
+
+@keyframes animeAuraPulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.08); }
+}
+
+.animate-anime-bounce {
+  animation: animeSquishBounce 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform;
+}
+
+.animate-star-burst {
+  animation: animeStarBurst 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-aura-glow {
+  animation: animeAuraPulse 2s infinite ease-in-out;
+}
+
+@keyframes scalePopIn {
+  from {
+    transform: scale(0.95) translate3d(0, -2px, 0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideUpSnappy {
+  from {
+    transform: translate3d(0, 8px, 0);
+    opacity: 0;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideRightSnappy {
+  from {
+    transform: translate3d(12px, 0, 0);
+    opacity: 0;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes msgPopIn {
+  from {
+    transform: translate3d(0, 4px, 0) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes errorShake {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20%, 60% { transform: translate3d(-7px, 0, 0); }
+  40%, 80% { transform: translate3d(7px, 0, 0); }
+}
+
+@keyframes softPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.94); }
+}
+
+.animate-pop-in {
+  animation: scalePopIn 180ms var(--ease-out) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-slide-up {
+  animation: slideUpSnappy 180ms var(--ease-out) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-slide-right {
+  animation: slideRightSnappy 200ms var(--ease-out) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-msg-in {
+  animation: msgPopIn 150ms var(--ease-out) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-bounce-short {
+  animation: errorShake 380ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+.animate-soft-pulse {
+  animation: softPulse 2.2s infinite ease-in-out;
+}
