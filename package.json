@@ -6,6 +6,7 @@
     "dev": "npm --prefix front-end run dev",
     "build": "npm --prefix front-end run build",
     "preview": "npm --prefix front-end run preview",
-    "test:server": "node temp-test-server/server.js"
+    "backend:dev": "python backend/manage.py runserver 8000",
+    "backend:seed": "python backend/manage.py init_test_operator"
   }
 }
