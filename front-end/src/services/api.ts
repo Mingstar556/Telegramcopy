@@ -202,6 +202,40 @@ class ApiService {
     const data = await res.json();
     return { success: true, messageId: data.message_id || data.id };
   }
+
+  /**
+   * Upload media file (photo, video, voice note) to backend
+   */
+  async uploadMedia(file: File | Blob, filename: string, token?: string): Promise<{ success: boolean; url: string }> {
+    if (this.useMock) {
+      const url = URL.createObjectURL(file);
+      return { success: true, url };
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file, filename);
+
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/api/media/upload/`, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+
+      if (!res.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await res.json();
+      return { success: true, url: data.url };
+    } catch (err) {
+      console.warn('Backend upload failed, falling back to local ObjectURL:', err);
+      return { success: true, url: URL.createObjectURL(file) };
+    }
+  }
 }
 
 export const api = new ApiService();

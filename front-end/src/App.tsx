@@ -9,6 +9,7 @@ import { SpecialView } from './components/special/SpecialView';
 import { AccountModal } from './components/modals/AccountModal';
 import { SpecialChatModal } from './components/modals/SpecialChatModal';
 import { SettingsModal } from './components/modals/SettingsModal';
+import { ShowcaseDemoToolbar } from './components/common/ShowcaseDemoToolbar';
 
 export const AppContent: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -108,6 +109,9 @@ export const AppContent: React.FC = () => {
           }
         }}
       />
+
+      {/* Showcase Demo Toolbar for live meeting presentations */}
+      <ShowcaseDemoToolbar />
     </div>
   );
 };

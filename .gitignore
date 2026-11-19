@@ -47,6 +47,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Temporary test server
+temp-test-server/
+temp-test-server/*
+
 # Editor & OS files
 .vscode/*
 !.vscode/extensions.json

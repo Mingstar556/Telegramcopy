@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check } from 'lucide-react';
+import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check, AlertCircle } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { audioRecorder } from '../../services/audioRecorder';
+import { audioRecorder, createDemoAudioVoice } from '../../services/audioRecorder';
 import { MediaAttachmentModal } from './MediaAttachmentModal';
 import { StickerPicker } from './StickerPicker';
 
@@ -17,6 +17,7 @@ export const ChatBar: React.FC = () => {
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [micError, setMicError] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,6 +66,7 @@ export const ChatBar: React.FC = () => {
   };
 
   const startVoiceRecording = async () => {
+    setMicError(null);
     try {
       await audioRecorder.startRecording();
       setIsRecording(true);
@@ -72,10 +74,20 @@ export const ChatBar: React.FC = () => {
       timerRef.current = window.setInterval(() => {
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
-    } catch (err) {
-      console.warn('Microphone fallback triggered:', err);
-      const fallbackUrl = 'https://actions.google.com/sounds/v1/communication/incoming_call.ogg';
-      await sendMedia('voice', fallbackUrl, 5);
+    } catch (err: unknown) {
+      console.warn('Microphone start error:', err);
+      const errMsg = err instanceof Error ? err.message : 'Microphone not accessible';
+      setMicError(errMsg.includes('Permission') ? 'Microphone permission denied. Allow mic or send demo voice sample.' : 'Microphone not detected. You can send a demo voice sample.');
+    }
+  };
+
+  const handleSendDemoVoiceNote = async () => {
+    setMicError(null);
+    try {
+      const demoResult = await createDemoAudioVoice(3);
+      await sendMedia('voice', demoResult.blob, demoResult.duration);
+    } catch (e) {
+      console.error('Failed to send demo voice note:', e);
     }
   };
 
@@ -88,7 +100,7 @@ export const ChatBar: React.FC = () => {
 
     try {
       const result = await audioRecorder.stopRecording();
-      await sendMedia('voice', result.url, result.duration);
+      await sendMedia('voice', result.blob, result.duration);
     } catch (e) {
       console.error('Failed to capture audio:', e);
     }
@@ -125,6 +137,32 @@ export const ChatBar: React.FC = () => {
         onClose={() => setIsAttachmentOpen(false)}
         onSelectMedia={handleSelectMedia}
       />
+
+      {/* Mic Warning & Demo Trigger Banner */}
+      {micError && (
+        <div className="mb-2 max-w-5xl mx-auto flex items-center justify-between gap-2 p-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs animate-fade-in">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <span>{micError}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSendDemoVoiceNote}
+              className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition text-[11px] whitespace-nowrap btn-press"
+            >
+              Send Demo Voice
+            </button>
+            <button
+              type="button"
+              onClick={() => setMicError(null)}
+              className="text-amber-300 hover:text-white text-xs px-1"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-end gap-2 max-w-5xl mx-auto">
         {/* Menu Button */}

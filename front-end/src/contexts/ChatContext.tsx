@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { wsService } from '../services/websocket';
+import { createDemoAudioVoice } from '../services/audioRecorder';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload, StickerItem } from '../types/chat';
 import { useAuth } from './AuthContext';
 
@@ -15,7 +16,8 @@ interface ChatContextValue {
   selectChat: (chatId: string) => void;
   sendMessage: (text: string) => Promise<void>;
   sendSticker: (sticker: StickerItem) => Promise<void>;
-  sendMedia: (type: 'photo' | 'video' | 'voice', fileOrUrl: File | string, duration?: number) => Promise<void>;
+  sendMedia: (type: 'photo' | 'video' | 'voice', fileOrUrl: File | Blob | string, duration?: number) => Promise<void>;
+  triggerShowcaseEvent?: (eventType: 'text' | 'voice' | 'photo' | 'typing') => Promise<void>;
   archiveChat: (chatId: string, archive?: boolean) => void;
   createGroup: (name: string, category: string, memberIds: string[]) => void;
   saveMessageToSaved: (message: ChatMessage) => void;
@@ -451,13 +453,25 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Send media (photo, video, voice note) matching backend requirements
    */
-  const sendMedia = async (type: 'photo' | 'video' | 'voice', fileOrUrl: File | string, duration?: number) => {
+  const sendMedia = async (type: 'photo' | 'video' | 'voice', fileOrUrl: File | Blob | string, duration?: number) => {
     if (!activeChatId || !account?.userId) return;
 
     const currentChatId = activeChatId;
     const msgId = 'media_' + Date.now();
-    const mediaUrl = typeof fileOrUrl === 'string' ? fileOrUrl : URL.createObjectURL(fileOrUrl);
-    const fileName = typeof fileOrUrl === 'string' ? undefined : fileOrUrl.name;
+    let mediaUrl = typeof fileOrUrl === 'string' ? fileOrUrl : URL.createObjectURL(fileOrUrl);
+    const fileName = typeof fileOrUrl === 'string' ? undefined : (fileOrUrl as File).name || (type === 'voice' ? 'voice.webm' : 'media');
+
+    // If live backend is available and file is Blob/File, upload to server
+    if (typeof fileOrUrl !== 'string' && !api.isMockMode()) {
+      try {
+        const uploadRes = await api.uploadMedia(fileOrUrl, fileName || (type === 'voice' ? 'voice.webm' : 'media'), token || undefined);
+        if (uploadRes?.url) {
+          mediaUrl = uploadRes.url;
+        }
+      } catch (err) {
+        console.warn('Media upload to server failed, using local URL:', err);
+      }
+    }
 
     const newLocalMediaMsg: ChatMessage = {
       id: msgId,
@@ -517,6 +531,39 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           m.id === msgId ? { ...m, status: 'delivered' } : m
         )
       }));
+
+      // In mock mode, simulate automatic response from target user/client after 1.5s
+      if (api.isMockMode()) {
+        setTimeout(() => {
+          const simulatedReply: ChatMessage = {
+            id: 'mock_reply_' + Date.now(),
+            senderId: currentChatId,
+            toUser: account.userId,
+            message: type === 'voice' 
+              ? '🎤 Listened to your voice message! Working on it.'
+              : `Received ${type} attachment. Looks good!`,
+            timestamp: Date.now(),
+            isOutgoing: false,
+            status: 'read'
+          };
+
+          setMessagesByChat(prev => ({
+            ...prev,
+            [currentChatId]: [...(prev[currentChatId] || []), simulatedReply]
+          }));
+
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === currentChatId);
+            if (idx >= 0) {
+              const updated = [...prev];
+              const conv = { ...updated[idx], lastMessage: simulatedReply };
+              updated.splice(idx, 1);
+              return [conv, ...updated];
+            }
+            return prev;
+          });
+        }, 1200);
+      }
     } catch (e) {
       console.error('Failed to send media:', e);
     }
@@ -524,6 +571,103 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const activeConversations = conversations.filter(c => !c.isArchived);
   const archivedConversations = conversations.filter(c => !!c.isArchived);
+
+  /**
+   * Trigger simulated test events for live showcase presentations
+   */
+  const triggerShowcaseEvent = async (eventType: 'text' | 'voice' | 'photo' | 'typing') => {
+    const targetChatId = activeChatId || (activeConversations[0]?.id !== 'saved_messages' ? activeConversations[0]?.id : activeConversations[1]?.id) || 'user_10293847';
+    const targetConv = conversations.find(c => c.id === targetChatId);
+    const senderName = targetConv?.user?.firstName || 'Alex';
+
+    if (eventType === 'typing') {
+      // Simulate typing status
+      setConversations(prev =>
+        prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'typing...' } } : c)
+      );
+      setTimeout(() => {
+        setConversations(prev =>
+          prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'online' } } : c)
+        );
+      }, 2500);
+      return;
+    }
+
+    let showcaseMsg: ChatMessage;
+
+    if (eventType === 'text') {
+      const phrases = [
+        "Hey! Could you confirm if the bot token sync completed successfully?",
+        "Everything looks great on our end! Just testing the Telegram client.",
+        "Quick question: Can we invite more operator IDs into this channel?",
+        "Received your update. Thanks for the quick response!"
+      ];
+      const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
+      showcaseMsg = {
+        id: 'showcase_text_' + Date.now(),
+        senderId: targetChatId,
+        senderName: senderName,
+        toUser: account?.userId || '1234',
+        message: randomPhrase,
+        timestamp: Date.now(),
+        isOutgoing: false,
+        status: 'read'
+      };
+    } else if (eventType === 'voice') {
+      const demoVoice = await createDemoAudioVoice(4);
+      showcaseMsg = {
+        id: 'showcase_voice_' + Date.now(),
+        senderId: targetChatId,
+        senderName: senderName,
+        toUser: account?.userId || '1234',
+        message: '[Voice Note]',
+        timestamp: Date.now(),
+        isOutgoing: false,
+        status: 'read',
+        media: {
+          type: 'voice',
+          url: demoVoice.url,
+          duration: demoVoice.duration
+        }
+      };
+    } else {
+      showcaseMsg = {
+        id: 'showcase_photo_' + Date.now(),
+        senderId: targetChatId,
+        senderName: senderName,
+        toUser: account?.userId || '1234',
+        message: '[Photo]',
+        timestamp: Date.now(),
+        isOutgoing: false,
+        status: 'read',
+        media: {
+          type: 'photo',
+          url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
+          fileName: 'analytics_report.jpg'
+        }
+      };
+    }
+
+    setMessagesByChat(prev => ({
+      ...prev,
+      [targetChatId]: [...(prev[targetChatId] || []), showcaseMsg]
+    }));
+
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === targetChatId);
+      if (idx >= 0) {
+        const updated = [...prev];
+        const updatedConv = {
+          ...updated[idx],
+          lastMessage: showcaseMsg,
+          unreadCount: (updated[idx].unreadCount || 0) + 1
+        };
+        updated.splice(idx, 1);
+        return [updatedConv, ...updated];
+      }
+      return prev;
+    });
+  };
 
   // Extract unique group categories
   const categories = Array.from(
@@ -551,6 +695,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendMessage,
         sendSticker,
         sendMedia,
+        triggerShowcaseEvent,
         archiveChat,
         createGroup,
         saveMessageToSaved,
