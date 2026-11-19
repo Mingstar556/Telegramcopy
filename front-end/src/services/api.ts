@@ -3,7 +3,7 @@ import { ChatConversation, ChatMessage, OutgoingBackendPayload } from '../types/
 import { INITIAL_MOCK_CONVERSATIONS, INITIAL_MOCK_MESSAGES, MOCK_BOT_USER } from './mockData';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-const USE_MOCK_DEFAULT = import.meta.env.VITE_USE_MOCK !== 'false';
+const USE_MOCK_DEFAULT = import.meta.env.VITE_USE_MOCK === 'true';
 
 class ApiService {
   private useMock: boolean = USE_MOCK_DEFAULT;

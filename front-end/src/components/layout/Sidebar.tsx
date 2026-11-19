@@ -95,8 +95,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>EMP #{account?.userId || '1234'}</span>
               </span>
               <span>•</span>
-              <span className={isMockMode ? 'text-amber-400' : 'text-emerald-400'}>
-                {isMockMode ? 'Mock' : 'Django Live'}
+              <span className="text-emerald-400">
+                Django Live
               </span>
             </div>
           </div>

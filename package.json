@@ -7,6 +7,7 @@
     "build": "npm --prefix front-end run build",
     "preview": "npm --prefix front-end run preview",
     "backend:dev": "python backend/manage.py runserver 8000",
-    "backend:seed": "python backend/manage.py init_test_operator"
+    "backend:seed": "python backend/manage.py init_test_operator",
+    "backend:poll": "python backend/manage.py run_bot_polling --user-id 1234"
   }
 }

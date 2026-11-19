@@ -91,10 +91,30 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = wsService.onMessage((incomingMsg) => {
       const chatId = incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId;
 
-      setMessagesByChat(prev => ({
-        ...prev,
-        [chatId]: [...(prev[chatId] || []), incomingMsg]
-      }));
+      setMessagesByChat(prev => {
+        const chatMsgs = prev[chatId] || [];
+        // Prevent duplicate messages with identical ID
+        if (chatMsgs.some(m => m.id === incomingMsg.id)) {
+          return prev;
+        }
+
+        // Match pending local outgoing message to replace with confirmed server message
+        if (incomingMsg.isOutgoing) {
+          const matchIdx = chatMsgs.findIndex(
+            m => m.isOutgoing && m.message === incomingMsg.message && Math.abs(m.timestamp - incomingMsg.timestamp) < 5000
+          );
+          if (matchIdx >= 0) {
+            const updated = [...chatMsgs];
+            updated[matchIdx] = { ...updated[matchIdx], id: incomingMsg.id, status: 'sent' };
+            return { ...prev, [chatId]: updated };
+          }
+        }
+
+        return {
+          ...prev,
+          [chatId]: [...chatMsgs, incomingMsg]
+        };
+      });
 
       // Update last message in conversation list
       setConversations(prev => {

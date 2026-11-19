@@ -19,7 +19,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onClose }) => {
-  const { createGroup } = useChat();
+  const { createGroup, conversations } = useChat();
   const { theme } = useTheme();
   const isGold = theme === 'black-gold';
 
@@ -27,7 +27,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onCl
   const [selectedCategory, setSelectedCategory] = useState('Customer Support');
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
-  const [selectedMembers, setSelectedMembers] = useState<string[]>(['user_10293847', 'user_58201944']);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [groupType, setGroupType] = useState<'group' | 'category'>('group');
   const [searchMember, setSearchMember] = useState('');
 
@@ -56,7 +56,11 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({ isOpen, onCl
     setIsCustomCategory(false);
   };
 
-  const filteredUsers = MOCK_USERS.filter(u => {
+  const candidateUsers = conversations.length > 0
+    ? conversations.filter(c => !c.isGroup && !c.isSavedMessages && c.user).map(c => c.user)
+    : MOCK_USERS;
+
+  const filteredUsers = candidateUsers.filter(u => {
     if (u.id === 'saved_messages') return false;
     const name = `${u.firstName} ${u.lastName || ''} ${u.username || ''}`.toLowerCase();
     return name.includes(searchMember.toLowerCase());

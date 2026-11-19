@@ -133,20 +133,11 @@ export const LoginModal: React.FC = () => {
         {/* Backend Mode & Theme Switcher Badges */}
         <div className="flex items-center justify-between mb-5 px-3 py-2 rounded-2xl bg-black/40 border border-white/5 text-xs">
           <div className="flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+            <Database className="w-3.5 h-3.5 text-emerald-400" />
             <span className="text-[var(--color-text-muted)]">Backend:</span>
-            <button
-              type="button"
-              onClick={() => setMockMode(!isMockMode)}
-              className={`font-semibold px-2 py-0.5 rounded-full transition ${
-                isMockMode
-                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                  : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
-              }`}
-              title="Click to toggle between Django API and Mock Simulator"
-            >
-              {isMockMode ? 'Mock Simulator' : 'Django Live'}
-            </button>
+            <span className="font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+              Django Live
+            </span>
           </div>
 
           <button

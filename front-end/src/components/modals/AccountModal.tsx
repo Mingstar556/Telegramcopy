@@ -121,7 +121,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
               </div>
               <div className="font-semibold text-xs mt-0.5 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>{isMockMode ? 'Mock Simulator (Frontend Mode)' : 'Live Django REST + WebSocket'}</span>
+                <span>Live Django REST + WebSocket</span>
               </div>
             </div>
             <span className="text-[11px] text-[var(--color-text-muted)] font-mono">

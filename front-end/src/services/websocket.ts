@@ -31,17 +31,22 @@ class WebSocketService {
       this.socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          const isOutgoing = data["is_outgoing"] !== undefined
+            ? Boolean(data["is_outgoing"])
+            : (data["User-ID"] === userId && data.action === 'sent');
+
           const incomingMessage: ChatMessage = {
             id: data.id || 'ws_' + Date.now(),
-            senderId: data["sender_id"] || data["from_user"] || data["to-user"],
+            senderId: isOutgoing ? userId : (data["sender_id"] || data["from_user"] || data["to-user"]),
             senderName: data.sender_name,
-            toUser: data["User-ID"] || userId,
+            toUser: isOutgoing ? (data["to-user"] || data["to_user"]) : (data["User-ID"] || userId),
             message: data.message || '',
             timestamp: data.timestamp ? Number(data.timestamp) : Date.now(),
-            isOutgoing: data["User-ID"] === userId && data.action === 'sent',
-            status: 'delivered',
+            isOutgoing,
+            status: data.status || 'delivered',
             action: data.action,
-            sticker: data.sticker
+            sticker: data.sticker,
+            media: data.media
           };
           this.notifyMessage(incomingMessage);
         } catch (err) {

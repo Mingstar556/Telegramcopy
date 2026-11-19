@@ -1,3 +1,4 @@
+import os
 from django.core.management.base import BaseCommand
 from telegram_chat.models import BotAccount, TelegramUser, ChatMessage
 
@@ -6,18 +7,21 @@ class Command(BaseCommand):
     help = 'Seeds initial test operator account and sample customers for the operator dashboard'
 
     def handle(self, *args, **options):
+        bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8290871821:AAF9tDx7ygLuVxb76d5XkNt6VfkyT2tqP3g')
+
         # 1. Create or update test operator 1234
         operator, created = BotAccount.objects.update_or_create(
             user_id="1234",
             defaults={
                 "password": "1234",
-                "bot_name": "CS Support Desk (Bot)",
-                "bot_username": "company_support_bot",
-                "description": "Customer Service operator bot account",
+                "bot_name": "kjel tv rean",
+                "bot_username": "anhkjeltvrean_bot",
+                "bot_token": bot_token,
+                "description": "Telegram bot operator session actively connected to Python/Django backend.",
                 "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop",
             }
         )
-        self.stdout.write(self.style.SUCCESS(f"Operator {operator.user_id} ready (password: 1234)."))
+        self.stdout.write(self.style.SUCCESS(f"Operator {operator.user_id} ready (password: 1234, token: {bot_token[:15]}...)."))
 
         # 2. Create sample customer Telegram users
         cust1, _ = TelegramUser.objects.update_or_create(

@@ -124,34 +124,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
               </div>
 
-              {/* Backend connection toggle */}
+              {/* Backend connection status */}
               <div className="p-4 rounded-2xl bg-black/30 border border-white/5 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Database className="w-4 h-4 text-[var(--color-accent)]" />
-                    <span className="font-semibold text-xs">Django Backend Mode</span>
+                    <Database className="w-4 h-4 text-emerald-400" />
+                    <span className="font-semibold text-xs">Django Backend Status</span>
                   </div>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                      isMockMode
-                        ? 'bg-amber-500/20 text-amber-300'
-                        : 'bg-emerald-500/20 text-emerald-300'
-                    }`}
-                  >
-                    {isMockMode ? 'MOCK MODE' : 'DJANGO LIVE'}
+                  <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-500/20 text-emerald-300">
+                    DJANGO LIVE CONNECTED
                   </span>
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Toggle between simulated test responses and live Python Django REST & Channels services.
+                  Connected directly to Python Django REST endpoints & Django Channels WebSocket on port 8000.
                 </p>
-                <div className="pt-2">
-                  <button
-                    onClick={() => setMockMode(!isMockMode)}
-                    className="text-xs px-3.5 py-2 rounded-xl border border-white/10 hover:bg-white/10 transition font-medium btn-press"
-                  >
-                    Switch to {isMockMode ? 'Live Django Server' : 'Mock Simulator'}
-                  </button>
-                </div>
               </div>
             </div>
           )}

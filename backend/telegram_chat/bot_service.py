@@ -1,8 +1,12 @@
+import os
+import secrets
+import asyncio
 import logging
 import requests
 from typing import Optional, Dict, Any
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.utils import timezone
 from .models import BotAccount, TelegramUser, ChatMessage
 
@@ -22,9 +26,11 @@ class TelegramBotGateway:
         """Fetch bot token for the given CS operator."""
         try:
             bot = BotAccount.objects.get(user_id=user_id)
-            return bot.bot_token if bot.bot_token else None
+            if bot.bot_token:
+                return bot.bot_token
         except BotAccount.DoesNotExist:
-            return None
+            pass
+        return os.environ.get('TELEGRAM_BOT_TOKEN')
 
     @staticmethod
     def send_telegram_message(
@@ -47,6 +53,17 @@ class TelegramBotGateway:
             if media and media.get('type') == 'voice':
                 voice_url = media.get('url', '')
                 url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendVoice"
+                if '/media/uploads/' in voice_url:
+                    local_filename = voice_url.split('/media/uploads/')[-1]
+                    local_path = settings.MEDIA_ROOT / 'uploads' / local_filename
+                    if os.path.exists(local_path):
+                        with open(local_path, 'rb') as f:
+                            files = {'voice': f}
+                            data = {'chat_id': chat_id}
+                            if text:
+                                data['caption'] = text
+                            resp = requests.post(url, data=data, files=files, timeout=15)
+                            return resp.json()
                 payload = {'chat_id': chat_id, 'voice': voice_url}
                 if text:
                     payload['caption'] = text
@@ -57,6 +74,17 @@ class TelegramBotGateway:
             if media and media.get('type') == 'photo':
                 photo_url = media.get('url', '')
                 url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendPhoto"
+                if '/media/uploads/' in photo_url:
+                    local_filename = photo_url.split('/media/uploads/')[-1]
+                    local_path = settings.MEDIA_ROOT / 'uploads' / local_filename
+                    if os.path.exists(local_path):
+                        with open(local_path, 'rb') as f:
+                            files = {'photo': f}
+                            data = {'chat_id': chat_id}
+                            if text:
+                                data['caption'] = text
+                            resp = requests.post(url, data=data, files=files, timeout=15)
+                            return resp.json()
                 payload = {'chat_id': chat_id, 'photo': photo_url}
                 if text:
                     payload['caption'] = text
@@ -85,13 +113,28 @@ class TelegramBotGateway:
         """Broadcast an incoming or status update to the operator's React frontend."""
         try:
             channel_layer = get_channel_layer()
-            if channel_layer:
+            if not channel_layer:
+                return
+
+            event = {
+                "type": "chat_message",
+                "data": message_payload
+            }
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                asyncio.ensure_future(
+                    channel_layer.group_send(f"operator_{operator_id}", event),
+                    loop=loop
+                )
+            else:
                 async_to_sync(channel_layer.group_send)(
                     f"operator_{operator_id}",
-                    {
-                        "type": "chat_message",
-                        "data": message_payload
-                    }
+                    event
                 )
         except Exception as e:
             logger.error(f"[WebSocket Gateway] Failed to broadcast event: {e}")
@@ -132,20 +175,38 @@ class TelegramBotGateway:
         media_url = None
         media_filename = None
 
+        bot_token = cls.get_bot_token(operator_id)
+
         if 'photo' in message_data:
             media_type = 'photo'
             photos = message_data['photo']
             file_id = photos[-1]['file_id']
-            media_url = f"https://api.telegram.org/file/bot/{file_id}"
+            if bot_token:
+                try:
+                    f_res = requests.get(f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile", params={'file_id': file_id}, timeout=5).json()
+                    if f_res.get('ok'):
+                        media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{f_res['result']['file_path']}"
+                except Exception as e:
+                    logger.warning(f"Error fetching photo file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token else ""
             text_content = message_data.get('caption', '')
         elif 'voice' in message_data:
             media_type = 'voice'
             file_id = message_data['voice']['file_id']
-            media_url = f"https://api.telegram.org/file/bot/{file_id}"
+            if bot_token:
+                try:
+                    f_res = requests.get(f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile", params={'file_id': file_id}, timeout=5).json()
+                    if f_res.get('ok'):
+                        media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{f_res['result']['file_path']}"
+                except Exception as e:
+                    logger.warning(f"Error fetching voice file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token else ""
             text_content = message_data.get('caption', '')
 
         # Create ChatMessage record
-        msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}"
+        msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}_{secrets.token_hex(4)}"
         chat_msg = ChatMessage.objects.create(
             message_uid=msg_uid,
             sender_id=telegram_id,
