@@ -2,7 +2,48 @@ import { BotAccount, LoginCredentials } from '../types/auth';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload } from '../types/chat';
 import { INITIAL_MOCK_CONVERSATIONS, INITIAL_MOCK_MESSAGES, MOCK_BOT_USER } from './mockData';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('userbot_server_url');
+    if (saved) return saved.replace(/\/+$/, '');
+    if ((window as any).__USERBOT_CONFIG__?.apiBaseUrl) {
+      return (window as any).__USERBOT_CONFIG__.apiBaseUrl.replace(/\/+$/, '');
+    }
+  }
+  return import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+}
+
+export function setApiBaseUrl(url: string): void {
+  const clean = url.trim().replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('userbot_server_url', clean);
+  }
+}
+
+export function getWsBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const savedWs = localStorage.getItem('userbot_ws_url');
+    if (savedWs) return savedWs;
+    const apiBase = getApiBaseUrl();
+    try {
+      const parsed = new URL(apiBase);
+      const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${wsProtocol}//${parsed.host}/ws/chat/`;
+    } catch {
+      // fallback
+    }
+  }
+  return import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8000/ws/chat/';
+}
+
+export interface HealthCheckResult {
+  status: 'ok' | 'error';
+  database?: 'connected' | 'disconnected';
+  message: string;
+  botsCount?: number;
+  serverUrl?: string;
+}
+
 const USE_MOCK_DEFAULT = import.meta.env.VITE_USE_MOCK === 'true';
 
 class ApiService {
@@ -16,21 +57,62 @@ class ApiService {
     return this.useMock;
   }
 
+  public getBaseUrl(): string {
+    return getApiBaseUrl();
+  }
+
   /**
-   * Check connection to Django backend
+   * Check connection to Django backend and active database probe
    */
-  async checkHealth(): Promise<{ status: 'ok' | 'error'; message: string }> {
+  async checkHealth(): Promise<HealthCheckResult> {
     if (this.useMock) {
-      return { status: 'ok', message: 'Running in Local Mock Mode' };
+      return { 
+        status: 'ok', 
+        database: 'connected', 
+        message: 'Running in Local Mock Mode',
+        serverUrl: 'mock://local'
+      };
     }
+
+    const base = this.getBaseUrl();
     try {
-      const res = await fetch(`${API_BASE}/api/health/`, { method: 'GET' });
-      if (res.ok) {
-        return { status: 'ok', message: 'Django Backend Connected' };
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+      const res = await fetch(`${base}/api/health/`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.database !== 'disconnected' && data.status !== 'error') {
+        return {
+          status: 'ok',
+          database: 'connected',
+          message: 'Connected to UserBot Server and Database',
+          botsCount: data.bots_configured,
+          serverUrl: base
+        };
       }
-      return { status: 'error', message: `Server responded with ${res.status}` };
-    } catch {
-      return { status: 'error', message: 'Cannot reach Django at ' + API_BASE };
+
+      return {
+        status: 'error',
+        database: 'disconnected',
+        message: data.error || (res.status === 503 ? 'Database is offline or locked' : `Server returned status ${res.status}`),
+        serverUrl: base
+      };
+    } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError';
+      return {
+        status: 'error',
+        database: 'disconnected',
+        message: isTimeout
+          ? `Connection timed out reaching ${base}`
+          : `Cannot reach server at ${base}. Host appears offline.`,
+        serverUrl: base
+      };
     }
   }
 
@@ -64,7 +146,8 @@ class ApiService {
       return { account, token: account.assignedToken! };
     }
 
-    const res = await fetch(`${API_BASE}/api/auth/login/`, {
+    const base = this.getBaseUrl();
+    const res = await fetch(`${base}/api/auth/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -105,10 +188,11 @@ class ApiService {
       };
     }
 
+    const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${API_BASE}/api/user/profile/?User-ID=${encodeURIComponent(userId)}`, {
+    const res = await fetch(`${base}/api/user/profile/?User-ID=${encodeURIComponent(userId)}`, {
       headers
     });
 
@@ -135,11 +219,12 @@ class ApiService {
       return INITIAL_MOCK_CONVERSATIONS;
     }
 
+    const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const syncParam = sync ? '&sync=true' : '';
-    const res = await fetch(`${API_BASE}/api/chats/?User-ID=${encodeURIComponent(userId)}${syncParam}`, {
+    const res = await fetch(`${base}/api/chats/?User-ID=${encodeURIComponent(userId)}${syncParam}`, {
       headers
     });
 
@@ -158,11 +243,12 @@ class ApiService {
       return INITIAL_MOCK_MESSAGES[toUser] || [];
     }
 
+    const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const res = await fetch(
-      `${API_BASE}/api/messages/?User-ID=${encodeURIComponent(userId)}&to-user=${encodeURIComponent(toUser)}`,
+      `${base}/api/messages/?User-ID=${encodeURIComponent(userId)}&to-user=${encodeURIComponent(toUser)}`,
       { headers }
     );
 
@@ -186,10 +272,11 @@ class ApiService {
       return { success: true, messageId: 'msg_' + Date.now() };
     }
 
+    const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${API_BASE}/api/messages/send/`, {
+    const res = await fetch(`${base}/api/messages/send/`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload)
@@ -214,13 +301,14 @@ class ApiService {
     }
 
     try {
+      const base = this.getBaseUrl();
       const formData = new FormData();
       formData.append('file', file, filename);
 
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_BASE}/api/media/upload/`, {
+      const res = await fetch(`${base}/api/media/upload/`, {
         method: 'POST',
         headers,
         body: formData

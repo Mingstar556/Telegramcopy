@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { useChat } from './contexts/ChatContext';
 import { LoginModal } from './components/auth/LoginModal';
@@ -9,9 +9,12 @@ import { SpecialView } from './components/special/SpecialView';
 import { AccountModal } from './components/modals/AccountModal';
 import { SpecialChatModal } from './components/modals/SpecialChatModal';
 import { SettingsModal } from './components/modals/SettingsModal';
+import { NoSignalScreen } from './components/common/NoSignalScreen';
+import { api } from './services/api';
+import { Loader2, Radio } from 'lucide-react';
 
 export const AppContent: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isMockMode } = useAuth();
   const { activeChat, selectChat } = useChat();
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chats');
@@ -19,7 +22,76 @@ export const AppContent: React.FC = () => {
   const [isSpecialOpen, setIsSpecialOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // If not authenticated, render Login Modal with test account & red error screen
+  // Connection & Signal status: 'checking' | 'connected' | 'no_signal'
+  const [signalStatus, setSignalStatus] = useState<'checking' | 'connected' | 'no_signal'>('checking');
+  const [signalError, setSignalError] = useState<string>('');
+
+  // Initial connection probe on app launch
+  useEffect(() => {
+    let isMounted = true;
+
+    const probeSignal = async () => {
+      if (isMockMode) {
+        if (isMounted) setSignalStatus('connected');
+        return;
+      }
+
+      const res = await api.checkHealth();
+      if (!isMounted) return;
+
+      if (res.status === 'ok') {
+        setSignalStatus('connected');
+      } else {
+        setSignalError(res.message || 'Server or database is not hosted');
+        setSignalStatus('no_signal');
+      }
+    };
+
+    probeSignal();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isMockMode]);
+
+  // 1. Initial Connecting Handshake Screen
+  if (signalStatus === 'checking') {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0a0a0c] text-white select-none">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl bg-red-950/40 border border-red-500/30 flex items-center justify-center animate-pulse">
+              <Radio className="w-8 h-8 text-red-400 animate-spin" style={{ animationDuration: '3s' }} />
+            </div>
+            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+            </span>
+          </div>
+
+          <div className="text-center">
+            <h2 className="text-lg font-bold tracking-tight text-zinc-100">UserBot Chat</h2>
+            <p className="text-xs text-zinc-400 mt-1 flex items-center gap-2 justify-center">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+              <span>Connecting to Server & Database...</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. NO SIGNAL SCREEN (when host/DB is offline)
+  if (signalStatus === 'no_signal') {
+    return (
+      <NoSignalScreen
+        initialError={signalError}
+        onConnected={() => setSignalStatus('connected')}
+      />
+    );
+  }
+
+  // 3. If not authenticated, render Login Modal with test account & red error screen
   if (!isAuthenticated) {
     return <LoginModal />;
   }

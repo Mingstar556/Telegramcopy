@@ -1,0 +1,7 @@
+{
+  "api_url": "http://127.0.0.1:8000",
+  "ws_url": "ws://127.0.0.1:8000/ws/chat/",
+  "window_title": "UserBot Chat",
+  "window_width": 1280,
+  "window_height": 840
+}

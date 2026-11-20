@@ -62,3 +62,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Standalone UserBot_chat application package
+!UserBot_chat/**
+UserBot_chat/**/__pycache__/
+

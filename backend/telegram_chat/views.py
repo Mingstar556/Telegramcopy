@@ -20,9 +20,32 @@ logger = logging.getLogger(__name__)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
-    """Health check for React client."""
+    """Health check for React client and live database connectivity."""
+    db_connected = False
+    bots_count = 0
+    db_error = None
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        bots_count = BotAccount.objects.count()
+        db_connected = True
+    except Exception as e:
+        logger.error(f"Health check DB probe failed: {e}")
+        db_error = str(e)
+
+    if not db_connected:
+        return Response({
+            "status": "error",
+            "database": "disconnected",
+            "error": db_error or "Database inaccessible",
+            "timestamp": timezone.now().isoformat()
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
     return Response({
         "status": "ok",
+        "database": "connected",
+        "bots_configured": bots_count,
         "service": "django_telegram_bridge",
         "timestamp": timezone.now().isoformat()
     })

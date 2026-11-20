@@ -1,6 +1,5 @@
 import { ChatMessage, OutgoingBackendPayload } from '../types/chat';
-
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8000/ws/chat/';
+import { getWsBaseUrl } from './api';
 
 export type MessageListener = (message: ChatMessage) => void;
 export type StatusListener = (connected: boolean) => void;
@@ -20,8 +19,9 @@ class WebSocketService {
     if (!this.isEnabled) return;
 
     try {
+      const wsBase = getWsBaseUrl();
       const tokenParam = resolvedToken ? `&token=${encodeURIComponent(resolvedToken)}` : '';
-      const url = `${WS_BASE}?user_id=${encodeURIComponent(userId)}${tokenParam}`;
+      const url = `${wsBase}?user_id=${encodeURIComponent(userId)}${tokenParam}`;
       this.socket = new WebSocket(url);
 
       this.socket.onopen = () => {
