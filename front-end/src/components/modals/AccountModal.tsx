@@ -117,11 +117,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-black/30 border border-white/5">
             <div>
               <div className="text-[var(--color-text-muted)] uppercase tracking-wider text-[10px] font-semibold">
-                Backend Connection
+                Connection
               </div>
               <div className="font-semibold text-xs mt-0.5 flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Live Django REST + WebSocket</span>
+                <span>Encrypted Connection</span>
               </div>
             </div>
             <span className="text-[11px] text-[var(--color-text-muted)] font-mono">
@@ -142,7 +142,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
             }`}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>Check Data from Django</span>
+            <span>Sync Profile</span>
           </button>
 
           <button

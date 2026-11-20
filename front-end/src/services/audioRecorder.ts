@@ -112,28 +112,82 @@ class AudioRecorderService {
   private stream: MediaStream | null = null;
 
   public async startRecording(): Promise<void> {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('Microphone recording is not supported in this browser.');
+    this.cleanup();
+
+    let stream: MediaStream | null = null;
+
+    // Cross-browser getUserMedia support
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          }
+        });
+      } catch (err: unknown) {
+        // Fallback with basic audio constraint
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch {
+          throw err;
+        }
+      }
+    } else {
+      const legacyGetUserMedia =
+        (navigator as unknown as { getUserMedia?: (c: unknown, s: (stream: MediaStream) => void, e: (err: unknown) => void) => void }).getUserMedia ||
+        (navigator as unknown as { webkitGetUserMedia?: (c: unknown, s: (stream: MediaStream) => void, e: (err: unknown) => void) => void }).webkitGetUserMedia ||
+        (navigator as unknown as { mozGetUserMedia?: (c: unknown, s: (stream: MediaStream) => void, e: (err: unknown) => void) => void }).mozGetUserMedia;
+
+      if (legacyGetUserMedia) {
+        stream = await new Promise<MediaStream>((resolve, reject) => {
+          legacyGetUserMedia.call(navigator, { audio: true }, resolve, reject);
+        });
+      } else {
+        throw new Error('Microphone recording is not supported in this browser. Please use Chrome, Edge, Safari, or Firefox.');
+      }
     }
 
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!stream) {
+      throw new Error('Could not access microphone.');
+    }
+
+    this.stream = stream;
     this.audioChunks = [];
     this.startTime = Date.now();
 
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm')
-      ? 'audio/webm'
-      : MediaRecorder.isTypeSupported('audio/mp4')
-      ? 'audio/mp4'
-      : '';
+    // Determine supported audio mime type
+    const mimeCandidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+      'audio/aac',
+      ''
+    ];
 
-    this.mediaRecorder = mimeType
-      ? new MediaRecorder(this.stream, { mimeType })
-      : new MediaRecorder(this.stream);
+    let chosenMime = '';
+    if (typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.isTypeSupported === 'function') {
+      for (const m of mimeCandidates) {
+        if (!m || MediaRecorder.isTypeSupported(m)) {
+          chosenMime = m;
+          break;
+        }
+      }
+    }
+
+    try {
+      this.mediaRecorder = chosenMime
+        ? new MediaRecorder(this.stream, { mimeType: chosenMime })
+        : new MediaRecorder(this.stream);
+    } catch {
+      // Fallback without options
+      this.mediaRecorder = new MediaRecorder(this.stream);
+    }
 
     this.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
+      if (event.data && event.data.size > 0) {
         this.audioChunks.push(event.data);
       }
     };
@@ -150,14 +204,19 @@ class AudioRecorderService {
 
       this.mediaRecorder.onstop = () => {
         const duration = Math.max(1, Math.round((Date.now() - this.startTime) / 1000));
-        const blob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+        const mime = this.mediaRecorder?.mimeType || 'audio/webm';
+        const blob = new Blob(this.audioChunks, { type: mime });
         const url = URL.createObjectURL(blob);
 
         this.cleanup();
         resolve({ blob, url, duration });
       };
 
-      this.mediaRecorder.stop();
+      try {
+        this.mediaRecorder.stop();
+      } catch (err) {
+        reject(err);
+      }
     });
   }
 
@@ -174,7 +233,13 @@ class AudioRecorderService {
 
   private cleanup(): void {
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      try {
+        this.stream.getTracks().forEach(track => {
+          track.stop();
+        });
+      } catch {
+        // ignore
+      }
       this.stream = null;
     }
     this.mediaRecorder = null;

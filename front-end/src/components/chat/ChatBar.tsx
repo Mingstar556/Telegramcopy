@@ -68,6 +68,7 @@ export const ChatBar: React.FC = () => {
   const startVoiceRecording = async () => {
     setMicError(null);
     try {
+      setMicError(null);
       await audioRecorder.startRecording();
       setIsRecording(true);
       setRecordingSeconds(0);
@@ -77,7 +78,11 @@ export const ChatBar: React.FC = () => {
     } catch (err: unknown) {
       console.warn('Microphone start error:', err);
       const errMsg = err instanceof Error ? err.message : 'Microphone not accessible';
-      setMicError(errMsg.includes('Permission') ? 'Microphone permission denied. Allow mic or send demo voice sample.' : 'Microphone not detected. You can send a demo voice sample.');
+      if (errMsg.toLowerCase().includes('permission') || errMsg.toLowerCase().includes('allowed')) {
+        setMicError('Microphone permission denied. Please allow microphone access in your browser settings.');
+      } else {
+        setMicError('Microphone not detected or not supported in this browser tab. You can click to send a demo voice sample.');
+      }
     }
   };
 
@@ -230,7 +235,7 @@ export const ChatBar: React.FC = () => {
               className="w-full bg-transparent text-sm resize-none outline-none max-h-32 text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] py-2 leading-relaxed tracking-tight"
             />
 
-            {/* Sticker Button */}
+            {/* Emoji Button */}
             <button
               type="button"
               onClick={() => setIsStickerPickerOpen(!isStickerPickerOpen)}
@@ -239,7 +244,7 @@ export const ChatBar: React.FC = () => {
                   ? 'text-[var(--color-accent)]'
                   : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
               }`}
-              title="Stickers"
+              title="Emojis"
             >
               <Smile className="w-5 h-5" />
             </button>

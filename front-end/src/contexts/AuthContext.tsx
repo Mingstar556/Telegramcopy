@@ -36,11 +36,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Connect WebSocket when authenticated
   useEffect(() => {
     if (authState.isAuthenticated && authState.account?.userId) {
-      wsService.connect(authState.account.userId);
+      wsService.connect(authState.account.userId, authState.token);
     } else {
       wsService.disconnect();
     }
-  }, [authState.isAuthenticated, authState.account?.userId]);
+  }, [authState.isAuthenticated, authState.account?.userId, authState.token]);
 
   const login = async (creds: LoginCredentials) => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));

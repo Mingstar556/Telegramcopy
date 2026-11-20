@@ -22,7 +22,7 @@ export const LoginModal: React.FC = () => {
     try {
       await login({ userId: userId.trim(), password: password.trim() });
     } catch {
-      triggerRedErrorScreen('Access Denied: Invalid User ID or Password (Test Account: 1234 / 1234)');
+      triggerRedErrorScreen('Access Denied: Invalid User ID or Password');
     }
   };
 
@@ -126,24 +126,16 @@ export const LoginModal: React.FC = () => {
             Telegram Operator Terminal
           </h2>
           <p className="text-xs sm:text-sm mt-1 text-[var(--color-text-muted)]">
-            Authorized employee portal to manage live chats, groups, and customer queries.
+            Authorized employee portal to manage live chats and customer queries.
           </p>
         </div>
 
-        {/* Backend Mode & Theme Switcher Badges */}
-        <div className="flex items-center justify-between mb-5 px-3 py-2 rounded-2xl bg-black/40 border border-white/5 text-xs">
-          <div className="flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-[var(--color-text-muted)]">Backend:</span>
-            <span className="font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
-              Django Live
-            </span>
-          </div>
-
+        {/* Header & Theme Switcher */}
+        <div className="flex items-center justify-end mb-4">
           <button
             type="button"
             onClick={() => setTheme(isGold ? 'simple-black' : 'black-gold')}
-            className="flex items-center gap-1 text-[var(--color-accent)] hover:opacity-80 transition font-medium"
+            className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:opacity-80 transition font-medium px-3 py-1.5 rounded-full bg-white/5 border border-white/10"
             title="Switch Theme"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -216,23 +208,11 @@ export const LoginModal: React.FC = () => {
             ) : (
               <>
                 <ShieldCheck className="w-4 h-4" />
-                <span>Log In as Staff Operator</span>
+                <span>Log In</span>
               </>
             )}
           </button>
         </form>
-
-        {/* 1-click test fill: 1234 / 1234 */}
-        <div className="mt-5 flex items-center justify-center gap-3 text-xs">
-          <button
-            type="button"
-            onClick={() => handleQuickDemoFill('1234', '1234')}
-            className="px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-[var(--color-accent)] hover:bg-white/10 transition font-medium flex items-center gap-1.5"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Staff Test Account (1234 / 1234)</span>
-          </button>
-        </div>
       </div>
     </div>
   );

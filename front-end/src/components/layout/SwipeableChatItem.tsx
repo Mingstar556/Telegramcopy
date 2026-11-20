@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Archive, Bot, Pin, Sparkles, Users, Bookmark } from 'lucide-react';
+import { Archive, Bot, Pin, Bookmark } from 'lucide-react';
 import { ChatConversation } from '../../types/chat';
 import { Avatar } from '../common/Avatar';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -13,7 +13,7 @@ interface SwipeableChatItemProps {
   isArchivedMode?: boolean;
 }
 
-export const SwipeableChatItem: React.FC<SwipeableChatItemProps> = ({
+const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
   chat,
   isActive,
   onSelect,
@@ -203,7 +203,6 @@ export const SwipeableChatItem: React.FC<SwipeableChatItemProps> = ({
           size="md"
           isOnline={chat.user.online}
           isSavedMessages={chat.isSavedMessages}
-          isGroup={chat.isGroup}
         />
 
         {/* Content Details */}
@@ -216,10 +215,6 @@ export const SwipeableChatItem: React.FC<SwipeableChatItemProps> = ({
                 <Bookmark className="w-3.5 h-3.5 text-[#2aabee] fill-[#2aabee] inline flex-shrink-0" />
               )}
 
-              {chat.isGroup && (
-                <Users className="w-3.5 h-3.5 text-indigo-400 inline flex-shrink-0" />
-              )}
-
               {chat.user.isBot && !chat.isSavedMessages && (
                 <Bot className="w-3.5 h-3.5 text-[var(--color-accent)] inline flex-shrink-0" />
               )}
@@ -230,21 +225,9 @@ export const SwipeableChatItem: React.FC<SwipeableChatItemProps> = ({
             </span>
           </div>
 
-          {/* Subtitle / Category Badge & Last Message */}
+          {/* Subtitle & Last Message */}
           <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
             <div className="flex items-center gap-1.5 truncate pr-2">
-              {chat.category && (
-                <span
-                  className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full font-bold tracking-wider flex-shrink-0 ${
-                    isGold
-                      ? 'bg-[#e5b842]/20 text-[#e5b842] border border-[#e5b842]/30'
-                      : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                  }`}
-                >
-                  {chat.category}
-                </span>
-              )}
-
               <p className="truncate leading-relaxed">
                 {chat.lastMessage?.isOutgoing && (
                   <span className="text-[var(--color-accent)] font-medium mr-1">You:</span>
@@ -282,3 +265,5 @@ export const SwipeableChatItem: React.FC<SwipeableChatItemProps> = ({
     </div>
   );
 };
+
+export const SwipeableChatItem = React.memo(SwipeableChatItemComponent);

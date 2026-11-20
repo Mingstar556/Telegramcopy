@@ -46,9 +46,6 @@ export interface ChatConversation {
   lastMessage?: ChatMessage;
   draft?: string;
   isPinned?: boolean;
-  isGroup?: boolean;
-  category?: string; // Group category: "Customer Support", "Technical Ops", "VIP Desk", "Internal"
-  memberCount?: number;
   isArchived?: boolean;
   isSavedMessages?: boolean;
 }

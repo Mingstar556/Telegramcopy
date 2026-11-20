@@ -1,0 +1,190 @@
+================================================================================
+                    TELEGRAM WEB CHAT & BOT CLIENT APPLICATION
+                              SYSTEM OVERVIEW & MANUAL
+================================================================================
+
+1. WHAT IS THIS APPLICATION?
+--------------------------------------------------------------------------------
+This application is a self-hosted, multi-device web chat system that connects 
+directly to a company Telegram Bot. It allows company employees / operators to 
+log into a modern web interface as the bot and communicate in real-time with 
+company clients who interact with the bot on Telegram.
+
+Key capabilities:
+- Employees log in with their credentials from any device (Desktop, Tablet, Mobile).
+- Concurrent multi-device sessions: an employee can be logged in from their office 
+  PC, home laptop, and phone at the same time without getting logged out.
+- Auto-fetching conversations: upon employee login or page refresh, client chats 
+  and message history are automatically fetched and synced from Telegram into the 
+  local database and displayed in the web chat list.
+- Two-way messaging: when an employee sends a message via the web UI, it is delivered 
+  instantly to the client on Telegram; when the client replies on Telegram, the web 
+  app receives it via real-time WebSocket.
+- Pure 1-on-1 customer service focus: group creation features have been removed to 
+  keep the interface focused, lightweight, and clean.
+
+================================================================================
+2. TECH STACK
+================================================================================
+Backend:
+- Python 3.12+
+- Django 5.x (Web Framework, ORM, REST API)
+- Django Channels & Daphne (ASGI server & WebSockets for instant message streaming)
+- SQLite (Self-hosted, zero-configuration local database)
+- python-dotenv (Environment configuration)
+- httpx / requests (Telegram Bot API integration)
+
+Frontend:
+- Node.js & Vite (Lightning-fast frontend build tooling)
+- React 18 & TypeScript (Type-safe, component-driven UI)
+- Tailwind CSS (Modern styling, clean dark mode & black-gold theme)
+- Lucide React (Crisp modern SVG icons)
+- Native WebSockets (Bi-directional real-time communication with Django Channels)
+
+================================================================================
+3. SYSTEM ARCHITECTURE & HOW IT WORKS
+================================================================================
+
+                               +--------------------+
+                               |   Client Phone     |
+                               | (Telegram App User)|
+                               +---------+----------+
+                                         |
+                                         | Telegram Bot API (HTTPS / Webhook)
+                                         v
++------------------+         +-------------------------------+
+|  Employee PC /   |         |      Self-Hosted Backend      |
+|  Mobile Web UI   | <=====> | (Django + Channels + Daphne)  |
+|  (React + Vite)  | WebSocket/REST |                        |
++------------------+         +---------------+---------------+
+                                             |
+                                     SQLite Database
+                        (Employees, Device Sessions, Chats, Messages)
+
+A. Multi-Device Object-Oriented Database Schema:
+- EmployeeAccount:
+  Represents company staff. Holds user_id, password_hash, display name, and avatar.
+- DeviceSession:
+  Tracks active sessions per employee. Each login creates a unique session token,
+  recording device_name, device_type (desktop, mobile, tablet), IP address, and 
+  last_activity timestamp. Employees can view and terminate active sessions.
+- BotAccount:
+  Links employee accounts to the company Telegram bot.
+- TelegramUser:
+  Represents clients who message the bot on Telegram (stores telegram_id, username, 
+  first/last name, phone number, and avatar).
+- ChatMessage:
+  Stores all incoming and outgoing messages (text, voice, photo, video, stickers,
+  reactions, read status, and delivery timestamps).
+
+B. Telegram Auto-Sync Engine:
+- On Login:
+  When an employee authenticates via /api/auth/login/, the backend triggers an 
+  automatic background conversation synchronization (sync_bot_conversations).
+- On Chats List Request:
+  When fetching /api/chats/?User-ID=...&sync=true, fresh updates are polled from 
+  the Telegram Bot API using offset tracking to prevent duplicate messages.
+- Real-Time Incoming Updates:
+  Supports both Telegram Webhooks (/api/telegram/webhook/) and long-polling. 
+  When a new client message arrives, it is saved to SQLite and broadcast via 
+  Django Channels WebSocket group (chat_<user_id>) to all connected employee devices.
+- Outgoing Message Dispatch:
+  When an employee types a message in the web UI, the backend sends it via 
+  sendMessage / sendPhoto / etc. to Telegram Bot API, saves it to SQLite, and echoes 
+  it to all active device sessions.
+
+================================================================================
+4. DIRECTORY & FILE ORGANIZATION
+================================================================================
+Telegramplugin-front/
+├── backend/
+│   ├── backend/               # Django project core (settings, asgi, wsgi, urls)
+│   ├── telegram_chat/         # Main chat application
+│   │   ├── migrations/        # Database migrations (OOP Schema & Multi-Device)
+│   │   ├── management/        # Seed command: python manage.py init_test_operator
+│   │   ├── tests/             # Comprehensive 118-test offline test suite
+│   │   ├── models.py          # OOP models (EmployeeAccount, DeviceSession, etc.)
+│   │   ├── views.py           # REST API endpoints (Auth, Chats, Sync, Sessions)
+│   │   ├── consumers.py       # WebSocket consumer for real-time messaging
+│   │   ├── bot_service.py     # Telegram Bot Gateway & sync logic
+│   │   └── urls.py            # API routing table
+│   ├── media/                 # Uploaded media (voices, photos, files)
+│   ├── db.sqlite3             # SQLite database file
+│   ├── manage.py              # Django management script
+│   └── requirements.txt       # Python dependencies
+├── front-end/
+│   ├── src/
+│   │   ├── components/        # UI components (ChatArea, Sidebar, MessageList, Auth)
+│   │   ├── contexts/          # React contexts (AuthContext, ChatContext, ThemeContext)
+│   │   ├── services/          # API client (api.ts) & WebSocket manager (websocket.ts)
+│   │   ├── types/             # TypeScript interfaces for Chat, User, Message
+│   │   └── index.css          # Modern styling, animations, smooth scrollbars
+│   ├── package.json           # Frontend dependencies & scripts
+│   └── vite.config.ts         # Vite build configuration & backend proxy
+├── APP_EXPLANATION.txt        # This architecture and operations manual
+└── package.json               # Root scripts to start backend & frontend simultaneously
+
+================================================================================
+5. HOW TO RUN AND TEST LOCALLY
+================================================================================
+
+Prerequisites:
+- Python 3.12+
+- Node.js 18+ & npm
+
+Demo Accounts & Connected Telegram Bots:
+-----------------------------------------
+1. Account 1:
+   - Bot Name:     ah fu (@Ah_fu_bot)
+   - User ID:      ahfu
+   - Password:     ahfu1234
+   - Bot Token:    9197397912:AAHC1HOhNvV-exC9uzRBsHZ6BJbmTFEoXyo
+
+2. Account 2:
+   - Bot Name:     Bingo (@mr_Bingoobot)
+   - User ID:      bingo
+   - Password:     bingo1234
+   - Bot Token:    9273467556:AAGsimmiJEQIoiuep62Xtuw_VcXOzaHWB3U
+
+3. Account 3:
+   - Bot Name:     mrlioma (@mrlionabot)
+   - User ID:      mrlioma
+   - Password:     mrlioma1234
+   - Bot Token:    9020018332:AAHLzQTJ04TUzqWOx5x-k8ydYRRQCOKBvQ0
+
+(Default fallback operator: User ID: 1234 / Password: 1234)
+
+Step 1: Set Up Backend Environment
+-----------------------------------
+1. Open a terminal in the backend directory:
+   cd backend
+2. Apply database migrations & seed bot accounts:
+   python manage.py migrate
+   python manage.py init_test_operator
+3. Run the backend server:
+   python manage.py runserver 0.0.0.0:8000
+
+Step 2: Set Up Frontend
+------------------------
+1. Open a new terminal in the front-end directory:
+   cd front-end
+2. Start the Vite development server:
+   npm run dev
+3. Open your browser and navigate to:
+   http://localhost:5173
+
+Step 3: Log In & Chat
+----------------------
+1. In the login modal, enter any of the 3 User IDs and Passwords above.
+2. The web interface will log into that specific bot account and auto-fetch 
+   conversations from Telegram into the chat sidebar.
+3. Chat in real-time with clients directly through the web UI!
+
+Step 4: Running Automated Tests
+--------------------------------
+The project includes a 118-test suite covering multi-device sessions, auth, 
+Telegram Bot sync, offline resilience, and WebSocket events with zero network 
+dependencies:
+   cd backend
+   python manage.py test telegram_chat.tests
+================================================================================

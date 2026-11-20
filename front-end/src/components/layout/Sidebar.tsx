@@ -2,16 +2,13 @@ import React, { useState } from 'react';
 import {
   MoreVertical,
   Search,
-  Bot,
   Sparkles,
   X,
-  Plus,
   Archive,
   ChevronDown,
   ChevronRight,
   Shield,
-  Bookmark,
-  Users
+  Bookmark
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useChat } from '../../contexts/ChatContext';
@@ -19,7 +16,6 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { Avatar } from '../common/Avatar';
 import { ThreeDotsMenu } from '../modals/ThreeDotsMenu';
 import { SwipeableChatItem } from './SwipeableChatItem';
-import { CreateGroupModal } from '../modals/CreateGroupModal';
 
 interface SidebarProps {
   onOpenAccount: () => void;
@@ -32,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSpecial,
   onOpenSettings
 }) => {
-  const { account, isMockMode } = useAuth();
+  const { account } = useAuth();
   const {
     conversations,
     archivedConversations,
@@ -41,31 +37,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
     searchQuery,
     setSearchQuery,
     archiveChat,
-    categories,
-    selectedCategory,
-    setSelectedCategory,
-    openSavedMessages
+    openSavedMessages,
+    isLoading
   } = useChat();
   const { theme } = useTheme();
   const isGold = theme === 'black-gold';
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [isArchivedOpen, setIsArchivedOpen] = useState(false);
 
   // Filter unarchived conversations
   const filteredChats = conversations.filter(c => {
-    // Category filter
-    if (selectedCategory && selectedCategory !== 'ALL' && c.category !== selectedCategory) {
-      return false;
-    }
-
     const query = searchQuery.toLowerCase();
     const fullName = `${c.user.firstName} ${c.user.lastName || ''}`.toLowerCase();
     const username = (c.user.username || '').toLowerCase();
     const lastMsg = (c.lastMessage?.message || '').toLowerCase();
-    const cat = (c.category || '').toLowerCase();
-    return fullName.includes(query) || username.includes(query) || lastMsg.includes(query) || cat.includes(query);
+    return fullName.includes(query) || username.includes(query) || lastMsg.includes(query);
   });
 
   return (
@@ -91,12 +78,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="text-[10px] text-[var(--color-text-muted)] truncate flex items-center gap-1.5 font-mono">
               <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                <Shield className="w-3 h-3" />
-                <span>EMP #{account?.userId || '1234'}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Online</span>
               </span>
               <span>•</span>
-              <span className="text-emerald-400">
-                Django Live
+              <span className="text-[var(--color-text-muted)]">
+                @{account?.botUsername || 'bot'}
               </span>
             </div>
           </div>
@@ -104,19 +91,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Action Header Icons */}
         <div className="flex items-center gap-1">
-          {/* Quick Create Group / Category Button */}
-          <button
-            onClick={() => setIsCreateGroupOpen(true)}
-            className={`w-9 h-9 rounded-full flex items-center justify-center btn-press transition ${
-              isGold
-                ? 'text-[#e5b842] hover:bg-[#e5b842]/10'
-                : 'text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10'
-            }`}
-            title="Create New Group or Category"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-          </button>
-
           {/* 3-Dots Menu Trigger */}
           <div className="relative">
             <button
@@ -143,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Modern Search Bar */}
-      <div className="px-3 pt-2.5 pb-1">
+      <div className="px-3 pt-2.5 pb-2">
         <div
           className={`flex items-center gap-2.5 px-3.5 py-2 rounded-2xl border text-xs transition-all duration-200 ${
             isGold
@@ -156,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search chats, groups & staff..."
+            placeholder="Search chats & messages..."
             className="w-full bg-transparent outline-none text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] text-xs"
           />
           {searchQuery && (
@@ -169,39 +143,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
       </div>
-
-      {/* Group Categories Filter Chips */}
-      {categories.length > 0 && (
-        <div className="px-3 py-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          <button
-            onClick={() => setSelectedCategory(null)}
-            className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap font-medium transition ${
-              !selectedCategory
-                ? isGold
-                  ? 'bg-[#e5b842] text-black font-bold'
-                  : 'bg-[var(--color-accent)] text-white font-bold'
-                : 'bg-white/5 text-[var(--color-text-muted)] hover:text-white'
-            }`}
-          >
-            All
-          </button>
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap font-medium transition ${
-                selectedCategory === cat
-                  ? isGold
-                    ? 'bg-[#e5b842] text-black font-bold'
-                    : 'bg-indigo-600 text-white font-bold'
-                  : 'bg-white/5 text-[var(--color-text-muted)] hover:text-white'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Chat List Scroll Area */}
       <div className="flex-1 overflow-y-auto px-2 space-y-1 py-1">
@@ -268,7 +209,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         {/* Regular Active Chats */}
-        {filteredChats.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-2 p-2">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/[0.02]">
+                <div className="w-12 h-12 rounded-full skeleton-shimmer flex-shrink-0" />
+                <div className="flex-1 space-y-2 min-w-0">
+                  <div className="h-3.5 w-28 rounded-md skeleton-shimmer" />
+                  <div className="h-2.5 w-44 rounded-md skeleton-shimmer" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredChats.length === 0 ? (
           <div className="p-10 text-center text-xs text-[var(--color-text-muted)]">
             No chats found
           </div>
@@ -300,12 +253,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span>Saved</span>
         </button>
       </div>
-
-      {/* Group & Group Category Creator Modal */}
-      <CreateGroupModal
-        isOpen={isCreateGroupOpen}
-        onClose={() => setIsCreateGroupOpen(false)}
-      />
     </aside>
   );
 };

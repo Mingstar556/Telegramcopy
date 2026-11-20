@@ -20,15 +20,6 @@ export const MOCK_USERS: TelegramUser[] = [
     lastSeen: 'Cloud Storage'
   },
   {
-    id: 'group_support_alpha',
-    username: 'support_squad_alpha',
-    firstName: 'Support Squad Alpha 🎧',
-    lastName: '',
-    avatar: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80',
-    online: true,
-    lastSeen: '5 members'
-  },
-  {
     id: 'user_10293847',
     username: 'alex_river',
     firstName: 'Alex',
@@ -98,25 +89,8 @@ export const INITIAL_MOCK_CONVERSATIONS: ChatConversation[] = [
     }
   },
   {
-    id: 'group_support_alpha',
-    user: MOCK_USERS[1],
-    unreadCount: 3,
-    isGroup: true,
-    category: 'Customer Support',
-    memberCount: 5,
-    lastMessage: {
-      id: 'm_grp_02',
-      senderId: 'user_10293847',
-      toUser: 'group_support_alpha',
-      message: 'Alex: Just dispatched the morning Telegram ticket queue.',
-      timestamp: Date.now() - 1000 * 60 * 2,
-      isOutgoing: false,
-      status: 'read'
-    }
-  },
-  {
     id: 'user_10293847',
-    user: MOCK_USERS[2],
+    user: MOCK_USERS[1],
     unreadCount: 2,
     lastMessage: {
       id: 'm_102',
@@ -130,7 +104,7 @@ export const INITIAL_MOCK_CONVERSATIONS: ChatConversation[] = [
   },
   {
     id: 'user_58201944',
-    user: MOCK_USERS[3],
+    user: MOCK_USERS[2],
     unreadCount: 0,
     lastMessage: {
       id: 'm_202',
@@ -144,7 +118,7 @@ export const INITIAL_MOCK_CONVERSATIONS: ChatConversation[] = [
   },
   {
     id: 'user_99201293',
-    user: MOCK_USERS[4],
+    user: MOCK_USERS[3],
     unreadCount: 1,
     lastMessage: {
       id: 'm_301',
@@ -158,7 +132,7 @@ export const INITIAL_MOCK_CONVERSATIONS: ChatConversation[] = [
   },
   {
     id: 'special_direct_bot',
-    user: MOCK_USERS[6],
+    user: MOCK_USERS[5],
     unreadCount: 0,
     isPinned: true,
     lastMessage: {
@@ -191,38 +165,6 @@ export const INITIAL_MOCK_MESSAGES: Record<string, ChatMessage[]> = {
       message: '📌 Notes: Remember to sync Django webhook endpoints for the 2.0 release.',
       timestamp: Date.now() - 1000 * 60 * 10,
       isOutgoing: true,
-      status: 'read'
-    }
-  ],
-  'group_support_alpha': [
-    {
-      id: 'm_grp_00',
-      senderId: 'user_58201944',
-      senderName: 'Sarah Chen',
-      toUser: 'group_support_alpha',
-      message: 'Team, please review the new Telegram bot broadcast templates.',
-      timestamp: Date.now() - 1000 * 60 * 45,
-      isOutgoing: false,
-      status: 'read'
-    },
-    {
-      id: 'm_grp_01',
-      senderId: MOCK_BOT_USER.userId,
-      senderName: 'Alpha Bot Operator',
-      toUser: 'group_support_alpha',
-      message: 'All staff endpoints are verified on Django Channels.',
-      timestamp: Date.now() - 1000 * 60 * 30,
-      isOutgoing: true,
-      status: 'read'
-    },
-    {
-      id: 'm_grp_02',
-      senderId: 'user_10293847',
-      senderName: 'Alex River',
-      toUser: 'group_support_alpha',
-      message: 'Alex: Just dispatched the morning Telegram ticket queue.',
-      timestamp: Date.now() - 1000 * 60 * 2,
-      isOutgoing: false,
       status: 'read'
     }
   ],

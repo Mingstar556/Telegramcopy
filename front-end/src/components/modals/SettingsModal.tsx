@@ -99,10 +99,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 <div className="flex justify-between items-center py-1 border-b border-white/5 text-xs">
-                  <span className="text-[var(--color-text-muted)]">Employee Operator ID</span>
+                  <span className="text-[var(--color-text-muted)]">Employee ID</span>
                   <span className="font-mono font-bold text-white flex items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">STAFF ONLY</span>
-                    <span>EMP-{account?.userId || '1234'}</span>
+                    <span>{account?.userId || '1234'}</span>
                   </span>
                 </div>
 
@@ -129,14 +128,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Database className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold text-xs">Django Backend Status</span>
+                    <span className="font-semibold text-xs">Server Connection</span>
                   </div>
                   <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-500/20 text-emerald-300">
-                    DJANGO LIVE CONNECTED
+                    ONLINE
                   </span>
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Connected directly to Python Django REST endpoints & Django Channels WebSocket on port 8000.
+                  WebSocket real-time messaging server actively connected.
                 </p>
               </div>
             </div>

@@ -49,7 +49,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
               size="sm"
               isOnline={activeChat.user.online}
               isSavedMessages={activeChat.isSavedMessages}
-              isGroup={activeChat.isGroup}
             />
 
             <div className="min-w-0">
@@ -58,17 +57,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
                 {activeChat.isSavedMessages && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-[#38bdf8]">
                     Cloud
-                  </span>
-                )}
-                {activeChat.category && (
-                  <span
-                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                      isGold
-                        ? 'bg-[#e5b842]/20 text-[#e5b842]'
-                        : 'bg-indigo-500/20 text-indigo-300'
-                    }`}
-                  >
-                    {activeChat.category}
                   </span>
                 )}
                 {activeChat.user.isBot && !activeChat.isSavedMessages && (
@@ -80,8 +68,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
               <div className="text-[11px] text-[var(--color-text-muted)] truncate flex items-center gap-1">
                 {activeChat.isSavedMessages ? (
                   <span className="text-[var(--color-text-muted)]">Your personal notes and cloud media</span>
-                ) : activeChat.isGroup ? (
-                  <span>{activeChat.memberCount || 5} members</span>
                 ) : activeChat.user.online ? (
                   <span className="text-emerald-400 font-medium">online</span>
                 ) : (

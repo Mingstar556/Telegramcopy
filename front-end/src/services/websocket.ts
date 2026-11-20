@@ -14,12 +14,14 @@ class WebSocketService {
   private currentUserId: string | null = null;
   private isEnabled: boolean = true;
 
-  public connect(userId: string) {
+  public connect(userId: string, token?: string | null) {
     this.currentUserId = userId;
+    const resolvedToken = token || localStorage.getItem('tg_bot_token');
     if (!this.isEnabled) return;
 
     try {
-      const url = `${WS_BASE}?user_id=${encodeURIComponent(userId)}`;
+      const tokenParam = resolvedToken ? `&token=${encodeURIComponent(resolvedToken)}` : '';
+      const url = `${WS_BASE}?user_id=${encodeURIComponent(userId)}${tokenParam}`;
       this.socket = new WebSocket(url);
 
       this.socket.onopen = () => {

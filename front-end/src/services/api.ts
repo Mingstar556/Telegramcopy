@@ -128,9 +128,9 @@ class ApiService {
   }
 
   /**
-   * Fetch chat list from Django backend
+   * Fetch chat list from Django backend with optional Telegram auto-sync
    */
-  async fetchConversations(userId: string, token?: string): Promise<ChatConversation[]> {
+  async fetchConversations(userId: string, token?: string, sync?: boolean): Promise<ChatConversation[]> {
     if (this.useMock) {
       return INITIAL_MOCK_CONVERSATIONS;
     }
@@ -138,7 +138,8 @@ class ApiService {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${API_BASE}/api/chats/?User-ID=${encodeURIComponent(userId)}`, {
+    const syncParam = sync ? '&sync=true' : '';
+    const res = await fetch(`${API_BASE}/api/chats/?User-ID=${encodeURIComponent(userId)}${syncParam}`, {
       headers
     });
 

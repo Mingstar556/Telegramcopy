@@ -11,6 +11,7 @@ interface ChatContextValue {
   activeChat: ChatConversation | null;
   activeMessages: ChatMessage[];
   isLoading: boolean;
+  typingStatus: boolean;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   selectChat: (chatId: string) => void;
@@ -19,16 +20,12 @@ interface ChatContextValue {
   sendMedia: (type: 'photo' | 'video' | 'voice', fileOrUrl: File | Blob | string, duration?: number) => Promise<void>;
   triggerShowcaseEvent?: (eventType: 'text' | 'voice' | 'photo' | 'typing') => Promise<void>;
   archiveChat: (chatId: string, archive?: boolean) => void;
-  createGroup: (name: string, category: string, memberIds: string[]) => void;
   saveMessageToSaved: (message: ChatMessage) => void;
   openSpecialChat: () => void;
   openSavedMessages: () => void;
   refreshChats: () => Promise<void>;
   isSpecialChatOpen: boolean;
   setIsSpecialChatOpen: (open: boolean) => void;
-  selectedCategory: string | null;
-  setSelectedCategory: (cat: string | null) => void;
-  categories: string[];
 }
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
@@ -41,7 +38,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSpecialChatOpen, setIsSpecialChatOpen] = useState<boolean>(false);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [typingChatIds, setTypingChatIds] = useState<Record<string, boolean>>({});
 
   // Load conversations when authenticated
   useEffect(() => {
@@ -55,7 +52,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const loadConversations = async () => {
       setIsLoading(true);
       try {
-        const chats = await api.fetchConversations(account.userId, token || undefined);
+        const chats = await api.fetchConversations(account.userId, token || undefined, true);
         setConversations(chats);
         // Default select first chat on wide screens
         if (chats.length > 0 && !activeChatId && window.innerWidth >= 768) {
@@ -90,6 +87,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = wsService.onMessage((incomingMsg) => {
       const chatId = incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId;
+
+      if (incomingMsg.action === 'typing') {
+        setTypingChatIds(prev => ({ ...prev, [chatId]: true }));
+        setTimeout(() => {
+          setTypingChatIds(prev => ({ ...prev, [chatId]: false }));
+        }, 3000);
+        return;
+      }
+
+      setTypingChatIds(prev => ({ ...prev, [chatId]: false }));
 
       setMessagesByChat(prev => {
         const chatMsgs = prev[chatId] || [];
@@ -216,61 +223,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  /**
-   * Create a new Group Chat or Group Category
-   */
-  const createGroup = (name: string, category: string, members: string[]) => {
-    if (!name.trim() || !account?.userId) return;
-    const newGroupId = 'group_' + Date.now();
-    const groupName = name.trim();
-    const chosenCat = category.trim() || 'General';
-
-    const newGroupConv: ChatConversation = {
-      id: newGroupId,
-      user: {
-        id: newGroupId,
-        username: groupName.toLowerCase().replace(/\s+/g, '_'),
-        firstName: groupName,
-        lastName: '',
-        avatar: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80',
-        online: true,
-        lastSeen: `${members.length + 1} members`
-      },
-      isGroup: true,
-      category: chosenCat,
-      memberCount: members.length + 1,
-      unreadCount: 0,
-      lastMessage: {
-        id: 'msg_welcome_' + Date.now(),
-        senderId: account.userId,
-        senderName: account.botName,
-        toUser: newGroupId,
-        message: `Group created in category [${chosenCat}] with ${members.length} members.`,
-        timestamp: Date.now(),
-        isOutgoing: true,
-        status: 'read'
-      }
-    };
-
-    setConversations(prev => [newGroupConv, ...prev]);
-    setMessagesByChat(prev => ({
-      ...prev,
-      [newGroupId]: [
-        {
-          id: 'msg_sys_' + Date.now(),
-          senderId: account.userId,
-          senderName: 'System',
-          toUser: newGroupId,
-          message: `Group "${groupName}" was created by Employee Operator #${account.userId}. Category: ${chosenCat}`,
-          timestamp: Date.now(),
-          isOutgoing: true,
-          status: 'read'
-        }
-      ]
-    }));
-
-    selectChat(newGroupId);
-  };
 
   /**
    * Save a message to the "Saved Messages" chat
@@ -498,7 +450,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       senderId: account.userId,
       senderName: account.botName,
       toUser: currentChatId,
-      message: type === 'voice' ? '[Voice Note]' : type === 'photo' ? '[Photo]' : '[Video]',
+      message: '',
       timestamp: Date.now(),
       isOutgoing: true,
       status: 'pending',
@@ -531,7 +483,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const payload: OutgoingBackendPayload = {
       "User-ID": account.userId,
       "to-user": currentChatId,
-      "message": newLocalMediaMsg.message,
+      "message": "",
       "action": "send_media",
       "media": {
         type,
@@ -602,14 +554,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (eventType === 'typing') {
       // Simulate typing status
+      setTypingChatIds(prev => ({ ...prev, [targetChatId]: true }));
       setConversations(prev =>
         prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'typing...' } } : c)
       );
       setTimeout(() => {
+        setTypingChatIds(prev => ({ ...prev, [targetChatId]: false }));
         setConversations(prev =>
           prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'online' } } : c)
         );
-      }, 2500);
+      }, 3000);
       return;
     }
 
@@ -689,17 +643,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
-  // Extract unique group categories
-  const categories = Array.from(
-    new Set(
-      conversations
-        .filter(c => c.category)
-        .map(c => c.category as string)
-    )
-  );
-
   const activeChat = conversations.find(c => c.id === activeChatId) || null;
   const activeMessages = (activeChatId ? messagesByChat[activeChatId] : []) || [];
+  const typingStatus = Boolean(
+    (activeChatId && typingChatIds[activeChatId]) ||
+    activeChat?.user?.lastSeen?.toLowerCase().includes('typing')
+  );
 
   return (
     <ChatContext.Provider
@@ -709,6 +658,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeChat,
         activeMessages,
         isLoading,
+        typingStatus,
         searchQuery,
         setSearchQuery,
         selectChat,
@@ -717,16 +667,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendMedia,
         triggerShowcaseEvent,
         archiveChat,
-        createGroup,
         saveMessageToSaved,
         openSpecialChat,
         openSavedMessages,
         refreshChats,
         isSpecialChatOpen,
-        setIsSpecialChatOpen,
-        selectedCategory,
-        setSelectedCategory,
-        categories
+        setIsSpecialChatOpen
       }}
     >
       {children}

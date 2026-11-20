@@ -270,3 +270,64 @@ html, body {
 .animate-soft-pulse {
   animation: softPulse 2.2s infinite ease-in-out;
 }
+
+/* Shimmer loading skeleton effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite ease-in-out;
+}
+
+.theme-black-gold .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(212, 175, 55, 0.04) 0%,
+    rgba(212, 175, 55, 0.14) 50%,
+    rgba(212, 175, 55, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite ease-in-out;
+}
+
+/* Telegram 3-dots typing indicator bounce animation */
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.animate-typing-dot-1 {
+  animation: typingBounce 1.2s infinite cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-typing-dot-2 {
+  animation: typingBounce 1.2s infinite cubic-bezier(0.16, 1, 0.3, 1) 0.18s;
+}
+
+.animate-typing-dot-3 {
+  animation: typingBounce 1.2s infinite cubic-bezier(0.16, 1, 0.3, 1) 0.36s;
+}
+
+/* Apple-style spring view transitions */
+.spring-transition {
+  transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}

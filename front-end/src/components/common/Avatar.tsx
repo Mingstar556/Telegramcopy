@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bookmark, Users } from 'lucide-react';
+import { Bookmark } from 'lucide-react';
 
 interface AvatarProps {
   id: string;
@@ -8,7 +8,6 @@ interface AvatarProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   isOnline?: boolean;
   isSavedMessages?: boolean;
-  isGroup?: boolean;
 }
 
 const MODERN_GRADIENTS = [
@@ -26,8 +25,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   avatarUrl,
   size = 'md',
   isOnline,
-  isSavedMessages,
-  isGroup
+  isSavedMessages
 }) => {
   const charCode = (id || name || 'A').charCodeAt(0);
   const gradient = MODERN_GRADIENTS[charCode % MODERN_GRADIENTS.length];
@@ -61,18 +59,6 @@ export const Avatar: React.FC<AvatarProps> = ({
           className={`${sizeClasses} rounded-full bg-gradient-to-tr from-[#229ad6] to-[#2aabee] text-white flex items-center justify-center shadow-md shadow-[#2aabee]/20 ring-1 ring-white/15`}
         >
           <Bookmark className={`${iconSize} fill-white stroke-[2.3]`} />
-        </div>
-      </div>
-    );
-  }
-
-  if (isGroup && !avatarUrl) {
-    return (
-      <div className="relative inline-block flex-shrink-0 select-none">
-        <div
-          className={`${sizeClasses} rounded-full bg-gradient-to-tr from-[#4f46e5] to-[#7c3aed] text-white flex items-center justify-center shadow-md shadow-indigo-500/20 ring-1 ring-white/15`}
-        >
-          <Users className={`${iconSize} stroke-[2.3]`} />
         </div>
       </div>
     );
