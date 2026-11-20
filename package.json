@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "start": "START_ALL.bat",
+    "host": "START_ALL.bat",
+    "stop": "STOP_ALL.bat",
     "dev": "npm --prefix front-end run dev",
     "build": "npm --prefix front-end run build",
     "preview": "npm --prefix front-end run preview",
-    "backend:dev": "python backend/manage.py runserver 8000",
-    "backend:seed": "python backend/manage.py init_test_operator",
-    "backend:poll": "python backend/manage.py run_bot_polling --user-id 1234"
+    "backend:migrate": "backend/venv/Scripts/python.exe backend/manage.py migrate",
+    "backend:dev": "backend/venv/Scripts/python.exe backend/manage.py runserver 0.0.0.0:8000",
+    "backend:seed": "backend/venv/Scripts/python.exe backend/manage.py init_test_operator",
+    "backend:poll": "backend/venv/Scripts/python.exe backend/manage.py run_bot_polling --user-id 1234"
   }
 }

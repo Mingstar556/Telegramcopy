@@ -9,6 +9,10 @@ export function getApiBaseUrl(): string {
     if ((window as any).__USERBOT_CONFIG__?.apiBaseUrl) {
       return (window as any).__USERBOT_CONFIG__.apiBaseUrl.replace(/\/+$/, '');
     }
+    // Dynamic network host detection: if accessed via LAN IP/hostname, point to that host on port 8000
+    if (window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
   }
   return import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 }
