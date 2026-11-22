@@ -175,10 +175,10 @@ export const MessageList: React.FC = () => {
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="sticky bottom-2 self-end p-2.5 rounded-full bg-[var(--color-bg-card)]/90 hover:bg-[var(--color-bg-card)] text-white shadow-2xl border border-white/10 hover:border-white/20 transition-all duration-200 z-20 btn-press animate-pop-in"
+          className="sticky bottom-3 self-center p-2.5 rounded-full bg-[var(--color-bg-card)]/95 hover:bg-[var(--color-bg-card)] text-white shadow-[0_8px_24px_rgba(0,0,0,0.5)] border border-white/15 hover:border-white/30 transition-all duration-200 z-20 btn-press animate-pop-in backdrop-blur-md flex items-center justify-center group"
           title="Scroll to latest messages"
         >
-          <ChevronDown className="w-4 h-4 text-[var(--color-accent)]" />
+          <ChevronDown className="w-4 h-4 text-[var(--color-accent)] group-hover:translate-y-0.5 transition-transform" />
         </button>
       )}
 
