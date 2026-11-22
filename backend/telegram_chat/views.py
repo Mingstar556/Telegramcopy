@@ -452,14 +452,14 @@ def chats_list(request):
             'avatar': '',
             'isBot': False,
             'isOnline': True,
-            'lastSeen': 'Cloud Storage'
+            'lastSeen': 'Individual Storage'
         },
         'unreadCount': 0,
         'lastMessage': format_message_dict(last_saved_msg) if last_saved_msg else None,
         'isPinned': True,
         'isGroup': False,
         'isSavedMessages': True,
-        'category': 'Private Notes',
+        'category': 'Individual Notes',
     }
     conversations.append(saved_conv)
 

@@ -50,7 +50,7 @@ export interface ChatMessage {
   timestamp: number;
   isOutgoing: boolean; // true if sent by the bot (logged-in user)
   status: 'pending' | 'sent' | 'delivered' | 'read';
-  action?: 'send_message' | 'send_sticker' | 'send_media' | 'send_photo' | 'typing' | 'status_check' | 'reaction' | 'delete_message';
+  action?: 'send_message' | 'send_sticker' | 'send_media' | 'send_photo' | 'send_video' | 'send_file' | 'typing' | 'status_check' | 'reaction' | 'delete_message';
   sticker?: {
     id: string;
     packId: string;
@@ -91,8 +91,11 @@ export interface OutgoingBackendPayload {
   "employee_id"?: string;
   "to_userid"?: string;
   "file"?: string;
+  "video"?: string;
   "caption"?: string;
   "Action"?: string;
+  "token"?: string;
+  "session_token"?: string;
   "sticker"?: {
     id: string;
     packId: string;

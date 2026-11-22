@@ -64,7 +64,7 @@ export const MediaAttachmentModal: React.FC<MediaAttachmentModalProps> = ({
       <input
         type="file"
         ref={videoInputRef}
-        accept="video/*,video/mp4,video/webm,video/quicktime,video/x-msvideo"
+        accept="video/*,video/mp4,video/webm,video/quicktime,video/x-msvideo,.mp4,.mov,.webm,.mkv,.avi,.m4v"
         onChange={handleVideoChange}
         className="hidden"
       />

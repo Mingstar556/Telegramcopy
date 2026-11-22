@@ -50,7 +50,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
   const isInsideSavedMessages = activeChat?.id === 'saved_messages';
   const fontSizePx = settings.fontSize || 15;
 
-  const handleSaveToCloud = (e: React.MouseEvent) => {
+  const handleSaveToIndividual = (e: React.MouseEvent) => {
     e.stopPropagation();
     saveMessageToSaved(message);
     setIsSavedToast(true);
@@ -268,11 +268,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
         </button>
       )}
 
-      {/* Save to Cloud Button */}
+      {/* Save to Individual Notes Button */}
       {!isInsideSavedMessages && (
         <button
-          onClick={handleSaveToCloud}
-          title="Save to Saved Messages"
+          onClick={handleSaveToIndividual}
+          title="Save to Individual Notes"
           className="p-1.5 rounded-full hover:bg-white/10 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] btn-press"
         >
           {isSavedToast ? (

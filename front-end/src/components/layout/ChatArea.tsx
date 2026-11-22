@@ -67,7 +67,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
                 <span>{fullName}</span>
                 {activeChat.isSavedMessages && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-[#38bdf8]">
-                    Cloud
+                    Individual
                   </span>
                 )}
                 {activeChat.user.isBot && !activeChat.isSavedMessages && (
@@ -78,7 +78,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
               </div>
               <div className="text-[11px] text-[var(--color-text-muted)] truncate flex items-center gap-1">
                 {activeChat.isSavedMessages ? (
-                  <span className="text-[var(--color-text-muted)]">Your personal notes and cloud media</span>
+                  <span className="text-[var(--color-text-muted)]">Your private individual notes and workspace</span>
                 ) : activeChat.user.online ? (
                   <span className="text-emerald-400 font-medium">online</span>
                 ) : (

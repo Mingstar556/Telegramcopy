@@ -18,8 +18,8 @@ export const MOCK_USERS: TelegramUser[] = [
     lastName: '',
     avatar: '',
     online: true,
-    lastSeen: 'Cloud Storage',
-    bio: 'Your personal cloud storage and note-taking workspace.'
+    lastSeen: 'Individual Storage',
+    bio: 'Your private individual notes and workspace.'
   },
   {
     id: '8164206458',

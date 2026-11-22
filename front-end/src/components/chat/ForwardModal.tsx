@@ -116,7 +116,7 @@ export const ForwardModal: React.FC<ForwardModalProps> = ({
                         {name}
                       </div>
                       <div className="text-[10px] text-[var(--color-text-muted)] truncate font-mono">
-                        {conv.isSavedMessages ? 'Personal Cloud' : `@${conv.user.username || conv.user.id}`}
+                        {conv.isSavedMessages ? 'Individual Notes' : `@${conv.user.username || conv.user.id}`}
                       </div>
                     </div>
                   </div>

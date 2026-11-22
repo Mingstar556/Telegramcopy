@@ -608,7 +608,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           lastName: '',
           avatar: '',
           online: true,
-          lastSeen: 'Cloud Storage'
+          lastSeen: 'Individual Storage'
         },
         unreadCount: 0,
         isPinned: true,
@@ -670,7 +670,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           lastName: '',
           avatar: '',
           online: true,
-          lastSeen: 'Cloud Storage'
+          lastSeen: 'Individual Storage'
         },
         unreadCount: 0,
         isPinned: true,
@@ -682,7 +682,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     notify({
       title: 'Saved Messages',
-      message: 'Message pinned to personal cloud notes',
+      message: 'Message saved to your individual notes',
       type: 'success'
     });
   };
@@ -963,14 +963,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const resolvedFileName = fileName || (typeof finalFileOrBlob === 'string'
       ? undefined
-      : (finalFileOrBlob as File).name || (type === 'voice' ? 'voice.webm' : type === 'photo' ? 'photo.jpg' : 'media'));
+      : (finalFileOrBlob as File).name || (type === 'voice' ? 'voice.webm' : type === 'photo' ? 'photo.jpg' : type === 'video' ? 'video.mp4' : 'document.bin'));
 
     // Upload to server if live backend
     if (typeof finalFileOrBlob !== 'string' && !api.isMockMode()) {
       try {
         const uploadRes = await api.uploadMedia(
           finalFileOrBlob,
-          resolvedFileName || 'upload',
+          resolvedFileName || (type === 'video' ? 'video.mp4' : 'upload'),
           token || undefined
         );
         if (uploadRes?.url) {
@@ -981,6 +981,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    const actionType = type === 'photo' ? 'send_photo' : type === 'video' ? 'send_video' : 'send_media';
+
     const newLocalMediaMsg: ChatMessage = {
       id: msgId,
       senderId: account.userId,
@@ -990,7 +992,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       timestamp: Date.now(),
       isOutgoing: true,
       status: 'pending',
-      action: type === 'photo' ? 'send_photo' : 'send_media',
+      action: actionType,
       media: {
         type,
         url: mediaUrl,
@@ -1022,10 +1024,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       "employee_id": account.userId,
       "to_userid": currentChatId,
       "file": mediaUrl,
-      "Action": type === 'photo' ? 'send_photo' : 'send_media',
+      "video": type === 'video' ? mediaUrl : undefined,
+      "Action": actionType,
       "message": caption?.trim() || '',
       "caption": caption?.trim() || '',
-      "action": type === 'photo' ? 'send_photo' : 'send_media',
+      "action": actionType,
+      "token": token || undefined,
+      "session_token": token || undefined,
       "media": {
         type,
         url: mediaUrl,
@@ -1036,7 +1041,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
-      wsService.send(payload);
+      const wsSent = wsService.send(payload);
       if (type === 'photo') {
         await api.sendPhoto({
           employee_id: account.userId,
@@ -1045,7 +1050,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           caption: caption || '',
           action: 'send_photo'
         }, token || undefined);
-      } else {
+      } else if (!wsSent) {
         await api.sendMessage(payload, token || undefined);
       }
 
