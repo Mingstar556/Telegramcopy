@@ -565,14 +565,98 @@ class TelegramBotGateway:
                         if reply_markup:
                             import json
                             data['reply_markup'] = json.dumps(reply_markup)
-                        resp = cls._post(url, data=data, files=files, timeout=15)
+                        resp = cls._post(url, data=data, files=files, timeout=25)
                         return resp.json()
                 payload = {'chat_id': chat_id, 'photo': photo_url}
                 if text:
                     payload['caption'] = text
                 if reply_markup:
                     payload['reply_markup'] = reply_markup
-                resp = cls._post(url, json=payload, timeout=10)
+                resp = cls._post(url, json=payload, timeout=15)
+                return resp.json()
+
+            # 2.1 Video Dispatch
+            if media_dict and media_dict.get('type') == 'video':
+                video_url = media_dict.get('url', '')
+                url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendVideo"
+                local_path = None
+                if '/media/uploads/' in video_url:
+                    local_filename = video_url.split('/media/uploads/')[-1]
+                    candidate = settings.MEDIA_ROOT / 'uploads' / local_filename
+                    if os.path.exists(candidate):
+                        local_path = candidate
+                elif video_url and not video_url.startswith(('http://', 'https://')):
+                    if os.path.exists(video_url):
+                        local_path = video_url
+                    elif os.path.exists(settings.MEDIA_ROOT / video_url):
+                        local_path = settings.MEDIA_ROOT / video_url
+                    elif os.path.exists(settings.MEDIA_ROOT / 'uploads' / os.path.basename(video_url)):
+                        local_path = settings.MEDIA_ROOT / 'uploads' / os.path.basename(video_url)
+
+                if local_path and os.path.exists(local_path):
+                    with open(local_path, 'rb') as f:
+                        files = {'video': f}
+                        data = {'chat_id': chat_id, 'supports_streaming': 'true'}
+                        if text:
+                            data['caption'] = text
+                        if media_dict.get('duration'):
+                            try:
+                                data['duration'] = int(media_dict.get('duration'))
+                            except Exception:
+                                pass
+                        if reply_markup:
+                            import json
+                            data['reply_markup'] = json.dumps(reply_markup)
+                        resp = cls._post(url, data=data, files=files, timeout=60)
+                        return resp.json()
+                payload = {'chat_id': chat_id, 'video': video_url, 'supports_streaming': True}
+                if text:
+                    payload['caption'] = text
+                if media_dict.get('duration'):
+                    try:
+                        payload['duration'] = int(media_dict.get('duration'))
+                    except Exception:
+                        pass
+                if reply_markup:
+                    payload['reply_markup'] = reply_markup
+                resp = cls._post(url, json=payload, timeout=30)
+                return resp.json()
+
+            # 2.2 Document / File Dispatch
+            if media_dict and media_dict.get('type') in ['file', 'document']:
+                doc_url = media_dict.get('url', '')
+                url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendDocument"
+                local_path = None
+                if '/media/uploads/' in doc_url:
+                    local_filename = doc_url.split('/media/uploads/')[-1]
+                    candidate = settings.MEDIA_ROOT / 'uploads' / local_filename
+                    if os.path.exists(candidate):
+                        local_path = candidate
+                elif doc_url and not doc_url.startswith(('http://', 'https://')):
+                    if os.path.exists(doc_url):
+                        local_path = doc_url
+                    elif os.path.exists(settings.MEDIA_ROOT / doc_url):
+                        local_path = settings.MEDIA_ROOT / doc_url
+                    elif os.path.exists(settings.MEDIA_ROOT / 'uploads' / os.path.basename(doc_url)):
+                        local_path = settings.MEDIA_ROOT / 'uploads' / os.path.basename(doc_url)
+
+                if local_path and os.path.exists(local_path):
+                    with open(local_path, 'rb') as f:
+                        files = {'document': f}
+                        data = {'chat_id': chat_id}
+                        if text:
+                            data['caption'] = text
+                        if reply_markup:
+                            import json
+                            data['reply_markup'] = json.dumps(reply_markup)
+                        resp = cls._post(url, data=data, files=files, timeout=60)
+                        return resp.json()
+                payload = {'chat_id': chat_id, 'document': doc_url}
+                if text:
+                    payload['caption'] = text
+                if reply_markup:
+                    payload['reply_markup'] = reply_markup
+                resp = cls._post(url, json=payload, timeout=30)
                 return resp.json()
 
             # 3. Sticker Dispatch

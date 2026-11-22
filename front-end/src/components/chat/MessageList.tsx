@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Bot, MessageCircle, Sparkles, Radio } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Bot, MessageCircle, Sparkles, Radio, ChevronDown } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { MessageBubble } from './MessageBubble';
@@ -9,13 +9,76 @@ import { ChatMessage } from '../../types/chat';
 export const MessageList: React.FC = () => {
   const { activeMessages, activeChat, typingStatus, isLoading } = useChat();
   const { theme } = useTheme();
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevChatIdRef = useRef<string | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
+  const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
 
-  // Auto scroll to latest message or active typing bubble
+  // Reliable scroll to bottom utility
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+  };
+
+  // 1. When opening or switching a chat: automatically scroll all the way down immediately
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMessages.length, typingStatus]);
+    if (activeChat?.id) {
+      scrollToBottom('auto');
+      // Rapid staggered ticks to ensure bottom position as DOM elements & layout settle
+      const t1 = setTimeout(() => scrollToBottom('auto'), 30);
+      const t2 = setTimeout(() => scrollToBottom('auto'), 100);
+      const t3 = setTimeout(() => scrollToBottom('auto'), 250);
+      const t4 = setTimeout(() => scrollToBottom('auto'), 500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+        clearTimeout(t4);
+      };
+    }
+  }, [activeChat?.id]);
+
+  // 2. When new messages arrive or typing status changes
+  useEffect(() => {
+    if (!activeChat?.id) return;
+    const isChatSwitch = prevChatIdRef.current !== activeChat.id;
+    prevChatIdRef.current = activeChat.id;
+
+    if (isChatSwitch) {
+      scrollToBottom('auto');
+    } else {
+      scrollToBottom('smooth');
+      const t = setTimeout(() => scrollToBottom('smooth'), 60);
+      return () => clearTimeout(t);
+    }
+  }, [activeMessages.length, typingStatus, activeChat?.id]);
+
+  // 3. Catch late image/avatar loads to maintain bottom scroll position
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleMediaLoad = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distanceFromBottom < 350) {
+        container.scrollTop = container.scrollHeight;
+      }
+    };
+
+    container.addEventListener('load', handleMediaLoad, true);
+    return () => container.removeEventListener('load', handleMediaLoad, true);
+  }, [activeChat?.id]);
+
+  // Detect user scroll position for floating "scroll to bottom" button
+  const handleScroll = () => {
+    if (!containerRef.current) return;
+    const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
+    const isScrolledUp = scrollHeight - scrollTop - clientHeight > 250;
+    setShowScrollBottomBtn(isScrolledUp);
+  };
 
   const isGold = theme === 'black-gold';
 
@@ -42,7 +105,11 @@ export const MessageList: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 flex flex-col justify-start">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 flex flex-col justify-start relative"
+    >
       {/* Encryption & Bot notice header */}
       <div className="flex justify-center my-2.5">
         <div className="px-3.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-[var(--color-text-muted)] flex items-center gap-1.5 shadow-sm">
@@ -102,6 +169,18 @@ export const MessageList: React.FC = () => {
       )}
 
       <div ref={bottomRef} />
+
+      {/* Floating Scroll to Bottom Jump Button */}
+      {showScrollBottomBtn && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom('smooth')}
+          className="sticky bottom-2 self-end p-2.5 rounded-full bg-[var(--color-bg-card)]/90 hover:bg-[var(--color-bg-card)] text-white shadow-2xl border border-white/10 hover:border-white/20 transition-all duration-200 z-20 btn-press animate-pop-in"
+          title="Scroll to latest messages"
+        >
+          <ChevronDown className="w-4 h-4 text-[var(--color-accent)]" />
+        </button>
+      )}
 
       {/* Forward Modal */}
       <ForwardModal

@@ -44,11 +44,16 @@ _MAX_LOGIN_ATTEMPTS = 15
 _LOGIN_WINDOW_SEC = 60
 
 ALLOWED_UPLOAD_EXTENSIONS = {
-    '.jpg', '.jpeg', '.png', '.gif', '.webp',
-    '.webm', '.mp3', '.ogg', '.wav', '.mp4',
-    '.pdf', '.txt', '.doc', '.docx'
+    # Images
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.heic', '.heif',
+    # Videos
+    '.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.3gp', '.wmv',
+    # Audio
+    '.mp3', '.ogg', '.wav', '.m4a', '.aac', '.flac', '.opus',
+    # Documents
+    '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.zip', '.rar', '.7z', '.json'
 }
-MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB (Matches Telegram Bot API upload limit)
 
 
 def _is_rate_limited(ip: str) -> bool:
@@ -606,10 +611,18 @@ def send_message(request):
     media = raw_media if isinstance(raw_media, dict) else None
     raw_album = request.data.get('album')
     album = raw_album if isinstance(raw_album, list) else None
-    if not media and (action == 'send_photo' or request.data.get('file')):
-        file_val = request.data.get('file') or request.data.get('photo')
+    if not media and (action in ['send_photo', 'send_video', 'send_media', 'send_file', 'send_voice'] or request.data.get('file') or request.data.get('video')):
+        file_val = request.data.get('file') or request.data.get('video') or request.data.get('photo')
         if file_val:
-            media = {'type': 'photo', 'url': str(file_val), 'fileName': os.path.basename(str(file_val))}
+            file_str = str(file_val).lower().split('?')[0]
+            m_type = 'photo'
+            if action == 'send_video' or any(file_str.endswith(ext) for ext in ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v']):
+                m_type = 'video'
+            elif action == 'send_voice' or any(file_str.endswith(ext) for ext in ['.webm', '.ogg', '.wav', '.mp3', '.m4a']):
+                m_type = 'voice'
+            elif action in ['send_file', 'send_document'] or any(file_str.endswith(ext) for ext in ['.pdf', '.zip', '.docx', '.xlsx', '.csv', '.apk', '.txt']):
+                m_type = 'file'
+            media = {'type': m_type, 'url': str(file_val), 'fileName': os.path.basename(str(file_val))}
 
     if not operator_id or not to_user:
         return Response({'detail': 'User-ID and to-user are required'}, status=status.HTTP_400_BAD_REQUEST)
