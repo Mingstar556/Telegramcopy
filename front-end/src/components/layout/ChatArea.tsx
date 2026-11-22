@@ -3,6 +3,7 @@ import { ArrowLeft, MoreVertical, Search, Bot, Sparkles } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Avatar } from '../common/Avatar';
+import { QuickAppearancePopover } from '../common/QuickAppearancePopover';
 import { ChatBar } from '../chat/ChatBar';
 import { MessageList } from '../chat/MessageList';
 import { ChatSummaryModal } from '../chat/ChatSummaryModal';
@@ -18,11 +19,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
 
   const isGold = theme === 'black-gold';
 
-  let wallpaperClass = '';
+  let wallpaperClass = 'tg-wallpaper-none';
   if (settings.backgroundPattern === 'doodles') {
     wallpaperClass = 'tg-wallpaper-doodles';
   } else if (settings.backgroundPattern === 'stars') {
     wallpaperClass = 'tg-wallpaper-stars';
+  } else if (settings.backgroundPattern === 'geometric') {
+    wallpaperClass = 'tg-wallpaper-geometric';
+  } else if (settings.backgroundPattern === 'mesh') {
+    wallpaperClass = 'tg-wallpaper-mesh';
   }
 
   const fullName = activeChat
@@ -81,6 +86,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
 
           {/* Right Header Actions */}
           <div className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+            <QuickAppearancePopover className="hidden md:block" />
             <button
               onClick={() => setIsSummaryOpen(true)}
               className={`px-2.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition btn-press ${
@@ -115,9 +121,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
 
       {/* Message Feed Canvas with Ambient Wallpaper */}
       <div
-        className={`flex-1 flex flex-col overflow-hidden relative ${wallpaperClass} transition-colors duration-200 ${
-          isGold ? 'bg-[#020202]' : 'bg-[#060608]'
-        }`}
+        className={`flex-1 flex flex-col overflow-hidden relative ${wallpaperClass} transition-colors duration-200 bg-[var(--color-bg-chat)]`}
       >
         <MessageList />
       </div>

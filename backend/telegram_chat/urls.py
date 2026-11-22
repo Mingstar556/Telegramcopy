@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, re_path
 from . import views
 
 urlpatterns = [
@@ -14,4 +14,6 @@ urlpatterns = [
     path('telegram/sync/', views.sync_telegram_view, name='sync_telegram'),
     path('telegram/webhook/', views.telegram_webhook, name='telegram_webhook_default'),
     path('telegram/webhook/<str:user_id>/', views.telegram_webhook, name='telegram_webhook'),
+    path('send_photo/', views.send_photo, name='send_photo'),
+    re_path(r'^send_photo/?$', views.send_photo, name='send_photo_flexible'),
 ]

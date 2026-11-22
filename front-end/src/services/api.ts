@@ -48,10 +48,8 @@ export interface HealthCheckResult {
   serverUrl?: string;
 }
 
-const USE_MOCK_DEFAULT = import.meta.env.VITE_USE_MOCK === 'true';
-
 class ApiService {
-  private useMock: boolean = USE_MOCK_DEFAULT;
+  private useMock: boolean = false;
 
   public setMockMode(enabled: boolean) {
     this.useMock = enabled;
@@ -328,6 +326,68 @@ class ApiService {
       console.warn('Backend upload failed, falling back to local ObjectURL:', err);
       return { success: true, url: URL.createObjectURL(file) };
     }
+  }
+
+  /**
+   * Send photo to backend endpoint /api/send_photo/
+   * Schema:
+   * employee_id: string
+   * to_userid: string
+   * file: string (URL or path) or File object
+   * caption?: string
+   * Action: "send_photo"
+   */
+  async sendPhoto(payload: {
+    employee_id: string;
+    to_userid: string;
+    file: string | File;
+    caption?: string;
+    action?: string;
+  }, token?: string): Promise<{ success: boolean; messageId?: string }> {
+    console.log('[API sendPhoto Payload]', payload);
+
+    if (this.useMock) {
+      await new Promise(r => setTimeout(r, 150));
+      return { success: true, messageId: 'msg_' + Date.now() };
+    }
+
+    const base = this.getBaseUrl();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let body: BodyInit;
+    if (typeof payload.file !== 'string') {
+      const formData = new FormData();
+      formData.append('employee_id', payload.employee_id);
+      formData.append('to_userid', payload.to_userid);
+      formData.append('file', payload.file, payload.file.name);
+      formData.append('Action', payload.action || 'send_photo');
+      if (payload.caption) formData.append('caption', payload.caption);
+      body = formData;
+    } else {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify({
+        employee_id: payload.employee_id,
+        to_userid: payload.to_userid,
+        file: payload.file,
+        caption: payload.caption || '',
+        Action: payload.action || 'send_photo'
+      });
+    }
+
+    const res = await fetch(`${base}/api/send_photo/`, {
+      method: 'POST',
+      headers,
+      body
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.message || 'Failed to send photo to backend');
+    }
+
+    const data = await res.json();
+    return { success: true, messageId: data.message_id || data.id };
   }
 }
 

@@ -104,10 +104,10 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
           isOutgoing
             ? isGold
               ? 'bg-[#e5b842] text-black hover:bg-[#f3c853]'
-              : 'bg-[#54bbf8] text-[#142333] hover:bg-[#72cbfb]'
+              : 'bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:opacity-90 shadow-sm'
             : isGold
             ? 'bg-[#e5b842]/20 text-[#e5b842] border border-[#e5b842]/40'
-            : 'bg-[#2aabee] text-white hover:bg-[#38bdf8]'
+            : 'bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:opacity-90 shadow-sm'
         }`}
         title={isPlaying ? 'Pause' : 'Play voice message'}
       >
@@ -141,7 +141,7 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
                   isFilled
                     ? isGold
                       ? 'bg-[#f3c853]'
-                      : 'bg-[#54bbf8]'
+                      : 'bg-[var(--color-accent)]'
                     : 'bg-white/25 hover:bg-white/40'
                 } ${isPlaying && isFilled ? 'animate-pulse' : ''}`}
               />

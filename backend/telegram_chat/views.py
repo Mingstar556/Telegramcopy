@@ -8,10 +8,26 @@ from django.conf import settings
 from django.db import OperationalError, IntegrityError
 from django.db.models import Q
 from django.contrib.auth.hashers import make_password, check_password
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.parsers import JSONParser, FormParser, MultiPartParser, BaseParser
+from .security import SecurityGuard, mask_sensitive_token, check_rate_limit
+
+
+class RawTextParser(BaseParser):
+    """
+    Accepts raw text or arbitrary media types and decodes the stream into a string.
+    Ensures text/plain or raw payload lines are not rejected with 415 Unsupported Media Type.
+    """
+    media_type = '*/*'
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        try:
+            return stream.read().decode('utf-8')
+        except Exception:
+            return ''
 
 from .models import EmployeeAccount, DeviceSession, BotAccount, TelegramUser, ChatMessage
 from .serializers import format_message_dict, format_user_dict
@@ -328,6 +344,21 @@ def chats_list(request):
     if not operator_id:
         return Response({'detail': 'User-ID is required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Blue Team Defense: Validate session token if provided (blocks cross-account enumeration & hijacked tokens)
+    current_token = None
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if auth_header.startswith('Bearer '):
+        current_token = auth_header.split(' ', 1)[1].strip()
+    if not current_token:
+        current_token = request.query_params.get('token') or request.query_params.get('session_token')
+
+    if current_token:
+        sess = DeviceSession.objects.filter(session_token=current_token, is_active=True).select_related('employee').first()
+        if not sess or not sess.employee or not sess.employee.is_active:
+            return Response({'detail': 'Invalid or expired session token'}, status=status.HTTP_401_UNAUTHORIZED)
+        if str(operator_id).strip() != sess.employee.user_id:
+            return Response({'detail': 'Forbidden: session does not belong to requested user'}, status=status.HTTP_403_FORBIDDEN)
+
     # Trigger conversation synchronization if sync query parameter is 'true'
     sync_param = request.query_params.get('sync')
     if sync_param and str(sync_param).strip().lower() in ['true', '1']:
@@ -416,6 +447,21 @@ def messages_history(request):
     if not operator_id or not to_user:
         return Response({'detail': 'User-ID and to-user parameters are required'}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Blue Team Defense: Validate session token if provided (blocks unauthorized DB dumping)
+    current_token = None
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if auth_header.startswith('Bearer '):
+        current_token = auth_header.split(' ', 1)[1].strip()
+    if not current_token:
+        current_token = request.query_params.get('token') or request.query_params.get('session_token')
+
+    if current_token:
+        sess = DeviceSession.objects.filter(session_token=current_token, is_active=True).select_related('employee').first()
+        if not sess or not sess.employee or not sess.employee.is_active:
+            return Response({'detail': 'Invalid or expired session token'}, status=status.HTTP_401_UNAUTHORIZED)
+        if str(operator_id).strip() != sess.employee.user_id:
+            return Response({'detail': 'Forbidden: session does not belong to requested user'}, status=status.HTTP_403_FORBIDDEN)
+
     messages = ChatMessage.objects.filter(
         (Q(sender_id=operator_id) & Q(to_user=to_user)) |
         (Q(sender_id=to_user) & Q(to_user=operator_id))
@@ -440,14 +486,18 @@ def send_message(request):
       "media": {...}
     }
     """
-    operator_id = request.data.get('User-ID')
-    to_user = request.data.get('to-user')
-    text = request.data.get('message', '')
-    action = request.data.get('action', 'send_message')
+    operator_id = request.data.get('User-ID') or request.data.get('employee_id') or request.data.get('userId')
+    to_user = request.data.get('to-user') or request.data.get('to_userid') or request.data.get('to_user')
+    text = request.data.get('message') if request.data.get('message') is not None else request.data.get('caption', '')
+    action = request.data.get('action') or request.data.get('Action', 'send_message')
     raw_sticker = request.data.get('sticker')
     sticker = raw_sticker if isinstance(raw_sticker, dict) else None
     raw_media = request.data.get('media')
     media = raw_media if isinstance(raw_media, dict) else None
+    if not media and (action == 'send_photo' or request.data.get('file')):
+        file_val = request.data.get('file') or request.data.get('photo')
+        if file_val:
+            media = {'type': 'photo', 'url': str(file_val), 'fileName': os.path.basename(str(file_val))}
 
     if not operator_id or not to_user:
         return Response({'detail': 'User-ID and to-user are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -470,6 +520,11 @@ def send_message(request):
 
     sess.last_activity = timezone.now()
     sess.save(update_fields=['last_activity'])
+
+    # Blue Team Defense: Validate outgoing message against phishing links and ABA payment tampering
+    is_safe, sec_err = SecurityGuard.validate_outgoing_message(text, operator_id, request.META.get('REMOTE_ADDR'))
+    if not is_safe:
+        return Response({'detail': sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
     # 2. Fetch Operator & Bot Token
     bot_token = TelegramBotGateway.get_bot_token(operator_id)
@@ -645,5 +700,338 @@ def telegram_webhook(request, user_id=None):
         '1234'
     )
     update = request.data
+    # Blue Team Defense: Validate incoming message payload against dangerous scripts or phishing
+    msg_obj = update.get('message') or update.get('edited_message') if isinstance(update, dict) else None
+    if isinstance(msg_obj, dict):
+        in_text = msg_obj.get('text') or msg_obj.get('caption', '')
+        if in_text:
+            is_safe, sec_err = SecurityGuard.validate_incoming_message(in_text, str(operator_id))
+            if not is_safe:
+                logger.warning(f"[SECURITY ALERT] Blocked malicious incoming message: {sec_err}")
+                return Response({"ok": False, "detail": sec_err}, status=status.HTTP_400_BAD_REQUEST)
+
     success = TelegramBotGateway.handle_incoming_telegram_update(operator_id, update)
     return Response({"ok": success})
+
+
+def _extract_photo_blocks(request) -> list:
+    """
+    Extract one or more photo dispatch requests from the incoming request.
+    Handles:
+    - JSON dict or list of dicts
+    - Form data (multipart/form-data or application/x-www-form-urlencoded)
+    - Raw text matching:
+      [11/17/2026 11:29 PM] Kavv 502: api/send_photo
+
+      employee_id RY
+      to_userid = YEAK
+      caption="this is a caption"
+      file="jabkjdnaknwdawd/dajkhbwdbnaw.png"
+      Action = send_photo
+    """
+    # 1. If request.data is a dict or QueryDict (e.g. JSON or Form)
+    if isinstance(request.data, dict) or hasattr(request.data, 'getlist'):
+        data_dict = dict(request.data.items()) if hasattr(request.data, 'items') else dict(request.data)
+        uploaded_file = request.FILES.get('file') or request.FILES.get('photo') or request.FILES.get('image')
+        if uploaded_file:
+            data_dict['_uploaded_file'] = uploaded_file
+
+        emp_key = next((k for k in ['employee_id', 'employeeId', 'User-ID', 'userId', 'user_id', 'operator_id', 'sender_id'] if k in data_dict), None)
+        to_key = next((k for k in ['to_userid', 'to_user_id', 'to_user', 'to-user', 'toUser', 'chat_id'] if k in data_dict), None)
+        if emp_key or to_key or uploaded_file:
+            return [data_dict]
+
+    # 2. If request.data is a list of dicts (JSON array)
+    if isinstance(request.data, list):
+        return [dict(item) for item in request.data if isinstance(item, dict)]
+
+    # 3. If raw text (either in request.data as str, or in request.body)
+    raw_text = ""
+    if isinstance(request.data, str) and request.data.strip():
+        raw_text = request.data
+    elif hasattr(request, 'body') and request.body:
+        try:
+            raw_text = request.body.decode('utf-8', errors='ignore')
+        except Exception:
+            raw_text = ""
+
+    if raw_text.strip():
+        lines = raw_text.splitlines()
+        blocks = []
+        current_lines = []
+        for line in lines:
+            stripped = line.strip()
+            is_header = (
+                ('api/send_photo' in stripped.lower()) or
+                (stripped.startswith('[') and ']' in stripped and any(x in stripped.lower() for x in ['api/', 'send_photo', ':']))
+            )
+            if is_header and current_lines:
+                text_chunk = '\n'.join(current_lines).lower()
+                if any(k in text_chunk for k in ['employee_id', 'to_userid', 'file']):
+                    blocks.append(current_lines)
+                    current_lines = []
+            current_lines.append(line)
+        if current_lines:
+            blocks.append(current_lines)
+
+        parsed_blocks = []
+        for b_lines in blocks:
+            d = {}
+            for line in b_lines:
+                line = line.strip()
+                if not line or (line.startswith('[') and ']' in line) or line.lower().startswith('api/') or line.lower().startswith('/api/'):
+                    continue
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                elif ':' in line:
+                    k, v = line.split(':', 1)
+                elif ' ' in line:
+                    k, v = line.split(None, 1)
+                else:
+                    continue
+                k = k.strip()
+                v = v.strip().strip('"\'')
+                d[k] = v
+            if d:
+                parsed_blocks.append(d)
+
+        if parsed_blocks:
+            return parsed_blocks
+
+    # 4. Fallback: check query params
+    if request.query_params:
+        qp = dict(request.query_params.items())
+        return [qp]
+
+    return []
+
+
+@api_view(['POST', 'GET'])
+@permission_classes([AllowAny])
+@parser_classes([JSONParser, FormParser, MultiPartParser, RawTextParser])
+def send_photo(request):
+    """
+    Handle send_photo requests matching:
+    [11/17/2026 11:29 PM] Kavv 502: api/send_photo
+
+    employee_id RY
+    to_userid = YEAK
+    caption="this is a caption"
+    file="jabkjdnaknwdawd/dajkhbwdbnaw.png"
+    Action = send_photo
+
+    Supports JSON, form-data, multipart upload, and raw message text.
+    """
+    if request.method == 'GET' and not request.query_params:
+        return Response({
+            "status": "ok",
+            "endpoint": "/api/send_photo/",
+            "expected_fields": ["employee_id", "to_userid", "file", "Action", "caption (optional)"]
+        })
+
+    blocks = _extract_photo_blocks(request)
+    if not blocks:
+        return Response({
+            "status": "error",
+            "detail": "No valid send_photo payload or message found. Required fields: employee_id, to_userid, file"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    results = []
+    for item in blocks:
+        # 1. Normalize field keys
+        employee_id = (
+            item.get('employee_id') or item.get('employeeId') or item.get('User-ID') or
+            item.get('userId') or item.get('user_id') or item.get('operator_id') or item.get('sender_id') or
+            request.query_params.get('employee_id') or request.META.get('HTTP_EMPLOYEE_ID') or
+            request.META.get('HTTP_USER_ID')
+        )
+        to_userid = (
+            item.get('to_userid') or item.get('to_user_id') or item.get('to_user') or
+            item.get('to-user') or item.get('toUser') or item.get('chat_id') or
+            request.query_params.get('to_userid')
+        )
+        caption = (
+            item.get('caption') or item.get('message') or item.get('text') or item.get('description') or ''
+        )
+        action = (
+            item.get('Action') or item.get('action') or item.get('action_type') or 'send_photo'
+        )
+        file_val = (
+            item.get('file') or item.get('photo') or item.get('image') or item.get('media')
+        )
+
+        if isinstance(caption, list):
+            caption = caption[0] if caption else ''
+        if isinstance(employee_id, list):
+            employee_id = employee_id[0] if employee_id else ''
+        if isinstance(to_userid, list):
+            to_userid = to_userid[0] if to_userid else ''
+        if isinstance(action, list):
+            action = action[0] if action else 'send_photo'
+
+        if isinstance(caption, str):
+            caption = caption.strip('"\'')
+        if isinstance(file_val, str):
+            file_val = file_val.strip('"\'')
+        if isinstance(employee_id, str):
+            employee_id = employee_id.strip('"\'').strip()
+        if isinstance(to_userid, str):
+            to_userid = to_userid.strip('"\'').strip()
+
+        # Handle uploaded file if present
+        uploaded_file = item.get('_uploaded_file') or request.FILES.get('file') or request.FILES.get('photo')
+        if uploaded_file and hasattr(uploaded_file, 'chunks'):
+            raw_name = os.path.basename(getattr(uploaded_file, 'name', 'photo.png'))
+            safe_name = "".join(c for c in raw_name if c.isalnum() or c in "._-")
+            upload_dir = settings.MEDIA_ROOT / 'uploads'
+            os.makedirs(upload_dir, exist_ok=True)
+            saved_filename = f"{secrets.token_hex(8)}_{safe_name}"
+            saved_path = upload_dir / saved_filename
+            with open(saved_path, 'wb+') as dest:
+                for chunk in uploaded_file.chunks():
+                    dest.write(chunk)
+            media_url = request.build_absolute_uri(f"{settings.MEDIA_URL}uploads/{saved_filename}")
+            media_filename = saved_filename
+            file_val = media_url
+        else:
+            if isinstance(file_val, list):
+                file_val = file_val[0] if file_val else ''
+            if not file_val:
+                return Response({
+                    "status": "error",
+                    "detail": "file parameter is required (path, URL, or multipart file)"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            media_url = str(file_val)
+            media_filename = os.path.basename(media_url.split('?')[0])
+
+        if not employee_id or not to_userid:
+            return Response({
+                "status": "error",
+                "detail": "employee_id and to_userid are required fields."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Blue Team Defense: Validate outgoing photo caption and file URL against phishing & ABA tampering
+        check_text = f"{caption or ''} {file_val or ''}".strip()
+        is_safe, sec_err = SecurityGuard.validate_outgoing_message(check_text, employee_id, request.META.get('REMOTE_ADDR'))
+        if not is_safe:
+            return Response({'detail': sec_err}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Ensure EmployeeAccount and BotAccount exist for operator
+        emp, _ = EmployeeAccount.objects.get_or_create(
+            user_id=employee_id,
+            defaults={
+                'username': f"Operator {employee_id}",
+                'password': make_password(employee_id),
+                'role': 'operator'
+            }
+        )
+        bot, _ = BotAccount.objects.get_or_create(
+            user_id=employee_id,
+            defaults={
+                'employee': emp,
+                'password': make_password(employee_id),
+                'bot_name': f"Bot {employee_id}",
+                'bot_username': f"bot_{employee_id.lower()}",
+                'bot_token': os.environ.get('TELEGRAM_BOT_TOKEN') or getattr(settings, 'TELEGRAM_BOT_TOKEN', '')
+            }
+        )
+
+        # 3. Ensure TelegramUser exists for recipient client
+        if to_userid != 'saved_messages':
+            TelegramUser.objects.get_or_create(
+                telegram_id=to_userid,
+                defaults={
+                    'first_name': to_userid,
+                    'username': to_userid
+                }
+            )
+
+        # 4. Persist ChatMessage in SQLite
+        msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}_{secrets.token_hex(4)}"
+        chat_msg = ChatMessage.objects.create(
+            message_uid=msg_uid,
+            sender_id=employee_id,
+            to_user=to_userid,
+            message=caption or "",
+            action=action or "send_photo",
+            is_outgoing=True,
+            status='sent',
+            media_type='photo',
+            media_url=media_url,
+            media_filename=media_filename
+        )
+
+        # 5. Dispatch to Telegram Bot API
+        bot_token = TelegramBotGateway.get_bot_token(employee_id)
+        tg_response = None
+        if to_userid != 'saved_messages':
+            media_dict = {
+                'type': 'photo',
+                'url': media_url,
+                'fileName': media_filename
+            }
+            tg_response = TelegramBotGateway.send_telegram_message(
+                bot_token=bot_token,
+                chat_id=to_userid,
+                text=caption or "",
+                media=media_dict
+            )
+
+        # 6. Real-time WebSocket broadcast to operator
+        ws_event = {
+            "id": msg_uid,
+            "sender_id": employee_id,
+            "User-ID": employee_id,
+            "to-user": to_userid,
+            "message": caption or "",
+            "timestamp": int(chat_msg.created_at.timestamp() * 1000),
+            "action": action or "send_photo",
+            "is_outgoing": True,
+            "status": "sent",
+            "media": {
+                "type": "photo",
+                "url": media_url,
+                "fileName": media_filename
+            }
+        }
+        TelegramBotGateway.notify_operator_via_websocket(employee_id, ws_event)
+        if to_userid and to_userid != employee_id:
+            TelegramBotGateway.notify_operator_via_websocket(to_userid, ws_event)
+
+        results.append({
+            "status": "success",
+            "success": True,
+            "message_id": msg_uid,
+            "employee_id": employee_id,
+            "to_userid": to_userid,
+            "file": file_val,
+            "caption": caption or "",
+            "action": action or "send_photo",
+            "message": {
+                "message_uid": msg_uid,
+                "sender_id": employee_id,
+                "to_user": to_userid,
+                "caption": caption or "",
+                "file": file_val,
+                "action": action or "send_photo",
+                "is_outgoing": True,
+                "media_url": media_url,
+                "created_at": chat_msg.created_at.isoformat(),
+            },
+            "telegram_response": tg_response
+        })
+
+    if len(results) == 1:
+        return Response(results[0], status=status.HTTP_200_OK)
+    return Response({
+        "status": "success",
+        "success": True,
+        "count": len(results),
+        "messages": results,
+        "message_id": results[-1]["message_id"],
+        "employee_id": results[-1]["employee_id"],
+        "to_userid": results[-1]["to_userid"],
+        "file": results[-1]["file"],
+        "caption": results[-1]["caption"],
+        "action": results[-1]["action"],
+    }, status=status.HTTP_200_OK)

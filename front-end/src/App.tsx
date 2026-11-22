@@ -5,21 +5,19 @@ import { LoginModal } from './components/auth/LoginModal';
 import { Sidebar } from './components/layout/Sidebar';
 import { ChatArea } from './components/layout/ChatArea';
 import { BottomNavBar, MobileTab } from './components/layout/BottomNavBar';
-import { SpecialView } from './components/special/SpecialView';
 import { AccountModal } from './components/modals/AccountModal';
-import { SpecialChatModal } from './components/modals/SpecialChatModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { NoSignalScreen } from './components/common/NoSignalScreen';
+import { NotificationToastContainer } from './components/common/NotificationToast';
 import { api } from './services/api';
 import { Loader2, Radio } from 'lucide-react';
 
 export const AppContent: React.FC = () => {
-  const { isAuthenticated, isMockMode } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { activeChat, selectChat } = useChat();
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chats');
   const [isAccountOpen, setIsAccountOpen] = useState(false);
-  const [isSpecialOpen, setIsSpecialOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Connection & Signal status: 'checking' | 'connected' | 'no_signal'
@@ -31,11 +29,6 @@ export const AppContent: React.FC = () => {
     let isMounted = true;
 
     const probeSignal = async () => {
-      if (isMockMode) {
-        if (isMounted) setSignalStatus('connected');
-        return;
-      }
-
       const res = await api.checkHealth();
       if (!isMounted) return;
 
@@ -52,7 +45,7 @@ export const AppContent: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isMockMode]);
+  }, []);
 
   // 1. Initial Connecting Handshake Screen
   if (signalStatus === 'checking') {
@@ -113,31 +106,14 @@ export const AppContent: React.FC = () => {
 
       {/* Main Viewport Container */}
       <div className="flex-1 flex overflow-hidden w-full h-full relative">
-        {/* Mobile Tab 2: Special View */}
-        {mobileTab === 'special' && !activeChat && (
-          <div className="md:hidden flex-1 flex flex-col h-full">
-            <div className="h-14 px-4 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-header)] font-bold text-sm">
-              <span>Special Extension Slot</span>
-              <button
-                onClick={() => setMobileTab('chats')}
-                className="text-xs text-[var(--color-accent)] font-semibold"
-              >
-                Back to Chats
-              </button>
-            </div>
-            <SpecialView />
-          </div>
-        )}
-
         {/* Conversation List / Sidebar */}
         <div
           className={`w-full md:w-80 lg:w-96 h-full flex-col ${
-            activeChat || (mobileTab === 'special') ? 'hidden md:flex' : 'flex'
+            activeChat ? 'hidden md:flex' : 'flex'
           }`}
         >
           <Sidebar
             onOpenAccount={() => setIsAccountOpen(true)}
-            onOpenSpecial={() => setIsSpecialOpen(true)}
             onOpenSettings={() => setIsSettingsOpen(true)}
           />
         </div>
@@ -166,11 +142,6 @@ export const AppContent: React.FC = () => {
         onClose={() => setIsAccountOpen(false)}
       />
 
-      <SpecialChatModal
-        isOpen={isSpecialOpen}
-        onClose={() => setIsSpecialOpen(false)}
-      />
-
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => {
@@ -180,6 +151,9 @@ export const AppContent: React.FC = () => {
           }
         }}
       />
+
+      {/* Global In-App Animated Notification Toasts */}
+      <NotificationToastContainer />
     </div>
   );
 };

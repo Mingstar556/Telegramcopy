@@ -24,19 +24,20 @@ Simply double-click the one-click launcher in the project root:
 
 ---
 
-## ⚡ Standalone Windows Desktop App (`UserBot_chat`)
+## ⚡ Standalone Windows Desktop App (`TBOTchat.exe`) & Public Employee Folder
 
-The application is completely packaged into a self-contained folder ready to run:
+The application is completely packaged into a self-contained, zero-leak employee folder:
 
-📁 **`UserBot_chat/`** (located in the project root and in `dist/UserBot_chat/`)
-- **`UserBot_chat.exe`**: Double-click to launch the native desktop client.
-- **Auto-Connect & Health Detection**:
-  - Automatically probes the server & SQLite/PostgreSQL database at startup.
-  - If the server/DB is hosted and active, the app automatically connects and displays the Login screen.
-  - If the server/DB is NOT being hosted, the app displays a retro **"NO SIGNAL"** screen with real-time radar, auto-reconnecting every 4 seconds as soon as the server is brought online.
-  - Allows editing the server host URL (e.g. `http://192.168.x.x:8000`) on the fly.
-- **`START_SERVER.bat`**: One-click script to start the local backend server & database host.
-- **`config.json`**: Easily configure the remote or local API/WebSocket endpoint.
+📁 **`TBOTchat-pubilc/`**
+- **`TBOTchat.exe`**: 17MB single-file standalone client (no Python, no Node, no loose DLLs).
+- **Auto-Connect & 1-Time Setup**:
+  - Automatically probes the 24/7 server & database at startup.
+  - If connected, displays the Login screen immediately.
+  - If server is unreachable or not yet configured, displays the retro **"NO SIGNAL"** screen with an active server URL input.
+  - Enter the company server URL (e.g. `https://chat.company.com` or `http://192.168.1.100:8000`) and click **Save & Connect**. The address is saved to `config.json` via `/api/save_config` and remembered forever.
+- **`Connect_Server.exe`**: Optional standalone CLI tool to test server connectivity and update `config.json`.
+- **`config.json`**: Easily configure remote or local API/WebSocket endpoints.
+- **Zero Sensitive Data**: Free of all backend source code, SQLite databases, Telegram bot tokens, and server scripts.
 
 ---
 

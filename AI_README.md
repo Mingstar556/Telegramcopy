@@ -211,27 +211,62 @@ These accounts are initialized via `python manage.py init_test_operator`:
 | `/api/chats/` | `GET` | `Authorization: Bearer <token>`, `?sync=true` | Returns chats for the authenticated bot; triggers sync. |
 | `/api/messages/` | `GET` | `Authorization: Bearer <token>`, `?chat_id=<id>` | Fetches message history for a conversation. |
 | `/api/messages/send/` | `POST` | `Authorization: Bearer <token>` | Dispatches outgoing text/voice/media to Telegram & DB. |
+| `/api/send_photo/` | `POST` | Public / Key-Value / JSON / Multipart | Dispatches photos to Telegram & DB (`employee_id`, `to_userid`, `file`, `Action`, `caption`). |
 | `/api/telegram/webhook/` | `POST` | Telegram Secret Header | Ingests incoming Telegram updates if webhooks are configured. |
 | `ws://<host>:8000/ws/chat/` | `WS` | `?token=<token>` | Real-time bi-directional message streaming. |
+| `http://127.0.0.1:<local_port>/api/save_config` | `POST` | Local Desktop Only | Persists new server `api_url` and auto-derived `ws_url` to `config.json` on disk. |
 
 ---
 
-## 7. ⚠️ Strict Guardrails for Future AI Agents ("DOs and DON'Ts")
+## 7. 24/7 Server PC Hosting & Public Client Architecture
+
+### A. Strict Two-Tier Repository Boundary
+The project is strictly split into two folders:
+1. **`TBOTchat-server/`** (Server Only):
+   - Hosts Django + Daphne ASGI + Telegram Bot gateway 24/7 on `0.0.0.0:8000`.
+   - Holds sensitive data: `db.sqlite3`, `backend/`, migrations, bot tokens, `.env`.
+   - **NEVER distribute this folder or any backend files to employees.**
+2. **`TBOTchat-pubilc/`** (Employee Distribution):
+   - Zero-sensitive footprint. Contains no source code, no database, and no credentials.
+   - Contains ONLY the packed single-file standalone client `TBOTchat.exe` (17MB), `config.json`, `Connect_Server.exe`, and `EMPLOYEE_GUIDE.txt`.
+
+### B. Remote Connectivity (Connecting From Anywhere)
+Because the server is hosted 24/7, remote operators connect across WAN/Internet:
+- **Cloudflare Tunnel (Standard)**: `cloudflared tunnel --url http://127.0.0.1:8000` -> yields `https://chat.company.com`. Zero router port forwarding, free SSL, native WSS support.
+- **Port Forwarding**: Router forwards external port 8000 -> Server LAN IP port 8000.
+- **VPN / Tailscale**: Private mesh network linking employee devices to the server machine.
+- Backend `settings.py` is pre-configured with `ALLOWED_HOSTS = ['*']` and `CORS_ALLOW_ALL_ORIGINS = True` to support remote access out of the box.
+
+### C. Single-File Standalone Client & 1-Time Setup Flow
+- **Packed Executable**: Built using `TBOTchat_onefile.spec` via PyInstaller `--onefile`. Embeds the compiled React bundle, Python runtime, and WebView2 bindings into a single portable binary (`TBOTchat.exe`). No loose `_internal/` DLL directories needed.
+- **1-Time Connection Lifecycle**:
+  1. On first launch on a new employee PC, if the configured server is unreachable, the retro "NO SIGNAL" screen displays an active input box immediately.
+  2. Employee pastes the company server address (e.g. `https://chat.company.com` or `http://192.168.1.50:8000`) and clicks **Save & Connect**.
+  3. App verifies connectivity via `/api/health/`.
+  4. Local HTTP server in `desktop_app.py` catches `POST /api/save_config`, auto-derives the WebSocket protocol (`ws://` vs `wss://`), and writes the updated address to `config.json` next to the executable.
+  5. The UI automatically transitions into the Login screen.
+  6. On all subsequent runs, `TBOTchat.exe` connects straight to the 24/7 server without prompting.
+
+---
+
+## 8. ⚠️ Strict Guardrails for Future AI Agents ("DOs and DON'Ts")
 
 To prevent bugs, performance degradations, or accidental reverts of production features, adhere strictly to these rules:
 
 ### ❌ What NEVER to Do:
-1. **DO NOT reintroduce demo autofill buttons or credentials to the UI**:
+1. **DO NOT leak server files or database into `TBOTchat-pubilc`**:
+   - Never copy `backend/`, `db.sqlite3`, `*.env`, `manage.py`, `START_ALL.bat`, or `INIT_DATABASE.bat` to `TBOTchat-pubilc`. Employees must only have client binaries.
+2. **DO NOT reintroduce demo autofill buttons or credentials to the UI**:
    - The login screen in `LoginModal.tsx` has been hardened for deployment. Do not add hardcoded "Autofill 1234" buttons or show test passwords on error screens.
-2. **DO NOT add group chat creation back**:
+3. **DO NOT add group chat creation back**:
    - Group functionality was intentionally removed to guarantee a focused 1-on-1 customer service architecture.
-3. **DO NOT bypass session authentication**:
+4. **DO NOT bypass session authentication**:
    - All protected backend APIs require validation against `DeviceSession`. Do not remove Bearer token validation or allow unauthenticated users to enumerate messages or device sessions.
-4. **DO NOT leak media files in automated tests**:
+5. **DO NOT leak media files in automated tests**:
    - In `backend/telegram_chat/tests/`, media operations MUST use `@override_settings(MEDIA_ROOT=temp_path)` with `tempfile.TemporaryDirectory()`. Never let test files escape into `backend/media/`.
-5. **DO NOT break the eye toggle for password fields**:
+6. **DO NOT break the eye toggle for password fields**:
    - The password field in `LoginModal.tsx` must maintain the `Eye` / `EyeOff` visibility toggle, preserving the dynamic input type and right padding (`pr-11`) so text never clips under the toggle button.
-6. **DO NOT use external network calls in backend unit tests**:
+7. **DO NOT use external network calls in backend unit tests**:
    - The test suite must remain 100% offline and fast, using `unittest.mock` for Telegram Bot API calls.
 
 ### ✅ What ALWAYS to Do:
@@ -246,12 +281,18 @@ To prevent bugs, performance degradations, or accidental reverts of production f
    python manage.py test telegram_chat.tests
    ```
    All 118 automated tests must pass with 0 failures and 0 errors.
-3. **Preserve theme variable compatibility**:
+3. **Rebuilding the single-file client**:
+   When updating the desktop client, always use the onefile spec:
+   ```bash
+   backend\venv\Scripts\python.exe -m PyInstaller --noconfirm TBOTchat_onefile.spec
+   ```
+   And copy the output `dist/TBOTchat.exe` to `TBOTchat-pubilc/`.
+4. **Preserve theme variable compatibility**:
    - Always style new components using either the established Tailwind classes or CSS variables (`var(--color-bg-base)`, `var(--color-accent)`, etc.) so they render seamlessly in both `simple-black` and `black-gold` themes.
 
 ---
 
-## 8. Common Developer Commands
+## 9. Common Developer Commands
 
 ```bash
 # Start everything with one script (Windows):

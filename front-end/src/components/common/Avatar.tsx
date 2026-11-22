@@ -8,6 +8,7 @@ interface AvatarProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   isOnline?: boolean;
   isSavedMessages?: boolean;
+  isGlow?: boolean;
 }
 
 const MODERN_GRADIENTS = [
@@ -25,7 +26,8 @@ export const Avatar: React.FC<AvatarProps> = ({
   avatarUrl,
   size = 'md',
   isOnline,
-  isSavedMessages
+  isSavedMessages,
+  isGlow = false
 }) => {
   const charCode = (id || name || 'A').charCodeAt(0);
   const gradient = MODERN_GRADIENTS[charCode % MODERN_GRADIENTS.length];
@@ -70,14 +72,18 @@ export const Avatar: React.FC<AvatarProps> = ({
         <img
           src={avatarUrl}
           alt={name}
-          className={`${sizeClasses} rounded-full object-cover ring-1 ring-white/10 shadow-sm`}
+          className={`${sizeClasses} rounded-full object-cover transition-all duration-300 ${
+            isGlow ? 'unseen-avatar-ring' : 'ring-1 ring-white/10 shadow-sm'
+          }`}
           onError={(e) => {
             (e.target as HTMLElement).style.display = 'none';
           }}
         />
       ) : (
         <div
-          className={`${sizeClasses} rounded-full bg-gradient-to-tr ${gradient} text-white flex items-center justify-center font-medium shadow-sm ring-1 ring-white/10`}
+          className={`${sizeClasses} rounded-full bg-gradient-to-tr ${gradient} text-white flex items-center justify-center font-medium transition-all duration-300 ${
+            isGlow ? 'unseen-avatar-ring' : 'ring-1 ring-white/10 shadow-sm'
+          }`}
         >
           {initials}
         </div>

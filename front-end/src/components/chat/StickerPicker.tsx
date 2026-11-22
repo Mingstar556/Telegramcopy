@@ -37,7 +37,7 @@ export const StickerPicker: React.FC<EmojiPickerProps> = ({ isOpen, onClose, onS
   return (
     <div
       style={{ transformOrigin: 'bottom right' }}
-      className={`absolute bottom-16 right-2 sm:right-6 w-80 sm:w-88 rounded-3xl border shadow-2xl z-40 backdrop-blur-2xl flex flex-col overflow-hidden animate-pop-in ${
+      className={`fixed sm:absolute bottom-16 sm:bottom-16 left-2 right-2 sm:left-auto sm:right-6 w-auto sm:w-88 max-w-sm mx-auto sm:mx-0 rounded-3xl border shadow-2xl z-40 backdrop-blur-2xl flex flex-col overflow-hidden animate-pop-in ${
         isGold
           ? 'bg-[#0f0e0a]/95 border-[#38301a] text-[#f5f2eb] shadow-[0_12px_45px_rgba(0,0,0,0.85)]'
           : 'bg-[#121318]/95 border-white/10 text-white shadow-2xl'

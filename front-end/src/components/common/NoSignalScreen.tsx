@@ -22,7 +22,7 @@ interface NoSignalScreenProps {
 
 export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, initialError }) => {
   const [currentUrl, setCurrentUrl] = useState<string>(getApiBaseUrl());
-  const [isEditingUrl, setIsEditingUrl] = useState(false);
+  const [isEditingUrl, setIsEditingUrl] = useState(true);
   const [tempUrl, setTempUrl] = useState(currentUrl);
   
   const [isChecking, setIsChecking] = useState(false);
@@ -78,17 +78,21 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
   const handleSaveUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!tempUrl.trim()) return;
-    setApiBaseUrl(tempUrl.trim());
-    setCurrentUrl(tempUrl.trim());
-    setIsEditingUrl(false);
-    countdownRef.current = 4;
-    setCountdown(4);
-    await performCheck(tempUrl.trim());
-  };
-
-  const handleEnterMock = () => {
-    api.setMockMode(true);
-    onConnected();
+    const cleanUrl = tempUrl.trim();
+    setApiBaseUrl(cleanUrl);
+    setCurrentUrl(cleanUrl);
+    try {
+      await fetch('/api/save_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_url: cleanUrl })
+      });
+    } catch {
+      // Ignored if offline or direct web
+    }
+    countdownRef.current = 2;
+    setCountdown(2);
+    await performCheck(cleanUrl);
   };
 
   return (
@@ -192,21 +196,21 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
             {isEditingUrl && (
               <form onSubmit={handleSaveUrl} className="p-3 bg-zinc-900/90 border border-blue-500/40 rounded-xl space-y-2 animate-in fade-in duration-150">
                 <label className="text-[11px] font-medium text-zinc-300 block">
-                  Set Custom Server Address (IP & Port):
+                  Company Server Address (Domain, Public IP, or Local IP):
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={tempUrl}
                     onChange={(e) => setTempUrl(e.target.value)}
-                    placeholder="http://127.0.0.1:8000 or http://192.168.1.100:8000"
+                    placeholder="https://chat.company.com or http://192.168.1.100:8000"
                     className="flex-1 px-3 py-1.5 bg-black/60 border border-zinc-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
                   />
                   <button
                     type="submit"
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow transition"
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow transition whitespace-nowrap"
                   >
-                    Save & Test
+                    Save & Connect
                   </button>
                 </div>
               </form>
@@ -265,18 +269,6 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
               </div>
             </div>
           )}
-
-          {/* Offline Mock Mode Option */}
-          <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between text-xs">
-            <span className="text-zinc-400 text-[11px]">Testing without a server?</span>
-            <button
-              onClick={handleEnterMock}
-              className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Launch Offline Demo Mode</span>
-            </button>
-          </div>
         </div>
 
         {/* Footer info */}

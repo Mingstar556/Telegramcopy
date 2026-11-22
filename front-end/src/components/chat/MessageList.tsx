@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Bot, MessageCircle } from 'lucide-react';
+import { Bot, MessageCircle, Sparkles, Radio } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { MessageBubble } from './MessageBubble';
@@ -18,19 +18,21 @@ export const MessageList: React.FC = () => {
 
   if (!activeChat) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-[var(--color-text-muted)] select-none">
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-[var(--color-text-muted)] select-none animate-pop-in">
         <div
-          className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
-            isGold ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'bg-[#2aabee]/15 text-[#2aabee]'
+          className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-transform hover:scale-105 shadow-xl ${
+            isGold
+              ? 'bg-[#d4af37]/15 text-[#e5b842] border border-[#d4af37]/30 shadow-[#e5b842]/10'
+              : 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] border border-[var(--color-accent)]/30 shadow-[var(--color-accent)]/10'
           }`}
         >
-          <MessageCircle className="w-8 h-8" />
+          <MessageCircle className="w-8 h-8 stroke-[2.2]" />
         </div>
-        <h3 className="text-base font-semibold text-[var(--color-text-main)]">
+        <h3 className="text-base font-bold text-[var(--color-text-main)] tracking-tight">
           Select a chat to start messaging
         </h3>
-        <p className="text-xs max-w-sm mt-1">
-          As a Telegram bot operator, you can respond to users who interact with your bot.
+        <p className="text-xs max-w-sm mt-1.5 leading-relaxed text-[var(--color-text-muted)]">
+          As a Telegram bot operator, all client interactions sync here in real time.
         </p>
       </div>
     );
@@ -39,8 +41,8 @@ export const MessageList: React.FC = () => {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 flex flex-col justify-start">
       {/* Encryption & Bot notice header */}
-      <div className="flex justify-center my-3">
-        <div className="px-3.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/5 text-[11px] text-[var(--color-text-muted)] flex items-center gap-1.5 shadow-sm">
+      <div className="flex justify-center my-2.5">
+        <div className="px-3.5 py-1 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-[11px] text-[var(--color-text-muted)] flex items-center gap-1.5 shadow-sm">
           <Bot className="w-3.5 h-3.5 text-[var(--color-accent)]" />
           <span>Bot session with {activeChat.user.firstName}</span>
         </div>
@@ -63,8 +65,9 @@ export const MessageList: React.FC = () => {
           </div>
         </div>
       ) : activeMessages.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-center text-xs text-[var(--color-text-muted)]">
-          No messages yet. Send a message to start the conversation!
+        <div className="flex-1 flex flex-col items-center justify-center text-center text-xs text-[var(--color-text-muted)] my-12 animate-pop-in">
+          <Sparkles className="w-6 h-6 text-[var(--color-accent)] mb-2 animate-soft-pulse" />
+          <p>No messages yet. Send a message to start the conversation!</p>
         </div>
       ) : (
         activeMessages.map((msg) => (
@@ -72,24 +75,21 @@ export const MessageList: React.FC = () => {
         ))
       )}
 
-      {/* Live Animated Telegram Typing Bubble */}
+      {/* Live Animated Telegram Typing Bubble with Pulsing Aura */}
       {typingStatus && (
         <div className="flex items-center gap-2 my-2 animate-msg-in">
           <div
-            className={`px-4 py-2.5 rounded-2xl rounded-bl-sm border backdrop-blur-md flex items-center gap-2.5 shadow-sm ${
-              isGold
-                ? 'bg-[#18150d]/90 border-[#38301a] text-[#f7f4ec]'
-                : 'bg-[#16181d]/90 border-white/10 text-[#f4f4f5]'
-            }`}
+            className="px-4 py-2.5 rounded-2xl rounded-bl-sm border backdrop-blur-xl flex items-center gap-3 shadow-lg bg-[var(--color-bg-bubble-in)] border-[var(--color-border)] animate-typing-aura"
           >
-            <div className="flex items-center gap-1">
-              <span className={`w-1.5 h-1.5 rounded-full animate-typing-dot-1 ${isGold ? 'bg-[#e5b842]' : 'bg-[#2aabee]'}`} />
-              <span className={`w-1.5 h-1.5 rounded-full animate-typing-dot-2 ${isGold ? 'bg-[#e5b842]' : 'bg-[#2aabee]'}`} />
-              <span className={`w-1.5 h-1.5 rounded-full animate-typing-dot-3 ${isGold ? 'bg-[#e5b842]' : 'bg-[#2aabee]'}`} />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-typing-dot-1" />
+              <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-typing-dot-2" />
+              <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-typing-dot-3" />
             </div>
-            <span className="text-xs text-[var(--color-text-muted)] font-medium">
-              Client is typing...
-            </span>
+            <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] font-medium">
+              <Radio className="w-3 h-3 text-[var(--color-accent)] animate-pulse" />
+              <span>{activeChat.user.firstName || 'Client'} is typing...</span>
+            </div>
           </div>
         </div>
       )}

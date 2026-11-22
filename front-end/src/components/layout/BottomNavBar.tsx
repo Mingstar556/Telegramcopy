@@ -3,7 +3,7 @@ import { MessageSquare, Sparkles, Settings, Zap } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useChat } from '../../contexts/ChatContext';
 
-export type MobileTab = 'chats' | 'special' | 'settings';
+export type MobileTab = 'chats' | 'settings';
 
 interface BottomNavBarProps {
   currentTab: MobileTab;
@@ -32,17 +32,16 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onChange
     sparkle?: string;
   }[] = [
     { key: 'chats', label: 'Chats', icon: MessageSquare, badge: totalUnread, sparkle: '✦' },
-    { key: 'special', label: 'Special', icon: Sparkles, sparkle: '★' },
     { key: 'settings', label: 'Settings', icon: Settings, sparkle: '⚙' }
   ];
 
   return (
-    <div className="fixed bottom-3 left-0 right-0 z-40 flex justify-center px-4 md:hidden pointer-events-none">
+    <div className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-0 right-0 z-40 flex justify-center px-4 md:hidden pointer-events-none">
       <nav
         className={`pointer-events-auto flex items-center justify-between w-full max-w-sm px-2 py-1.5 rounded-full border shadow-[0_12px_40px_rgba(0,0,0,0.65)] select-none backdrop-blur-2xl transition-all duration-300 ${
           isGold
             ? 'bg-[#0f0e0a]/92 border-[#e5b842]/30 shadow-[#e5b842]/10'
-            : 'bg-[#12131a]/92 border-white/15 shadow-[#2aabee]/15'
+            : 'bg-[var(--color-bg-header)] border-[var(--color-border)] shadow-[var(--color-accent-glow)]'
         }`}
       >
         {tabs.map((tab) => {
@@ -55,24 +54,17 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ currentTab, onChange
               key={tab.key}
               type="button"
               onClick={() => handleTabClick(tab.key)}
-              className={`relative flex-1 flex flex-col items-center justify-center py-1.5 px-3 rounded-full transition-all duration-200 active:scale-85 ${
+              className={`relative flex-1 flex flex-col items-center justify-center py-2 px-3 rounded-full transition-all duration-200 active:scale-90 ${
                 isActive
-                  ? isGold
-                    ? 'text-black font-extrabold'
-                    : 'text-white font-extrabold'
+                  ? 'text-[var(--color-accent-text)] font-extrabold'
                   : 'text-[var(--color-text-muted)] hover:text-white'
               }`}
             >
-              {/* Anime Floating Active Aura Pill */}
+              {/* Floating Active Aura Pill */}
               {isActive && (
                 <div
-                  className={`absolute inset-0 rounded-full transition-all duration-300 -z-10 ${
-                    isGold
-                      ? 'bg-gradient-to-r from-[#d4af37] via-[#f3c853] to-[#e5b842] shadow-[0_0_20px_rgba(229,184,66,0.5)]'
-                      : 'bg-gradient-to-r from-[#229ad6] via-[#2aabee] to-[#38bdf8] shadow-[0_0_20px_rgba(42,171,238,0.5)]'
-                  }`}
+                  className="absolute inset-0 rounded-full transition-all duration-300 -z-10 bg-[var(--color-accent)] shadow-lg shadow-[var(--color-accent-glow)]"
                 >
-                  {/* Subtle anime energetic aura shimmer */}
                   <span className="absolute inset-0 rounded-full bg-white/20 animate-aura-glow" />
                 </div>
               )}

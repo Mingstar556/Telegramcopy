@@ -58,16 +58,6 @@ export const MOCK_USERS: TelegramUser[] = [
     online: false,
     lastSeen: 'last seen 2 hours ago',
     employeeBadge: 'VIP User'
-  },
-  {
-    id: 'special_direct_bot',
-    username: 'special_assistant',
-    firstName: 'Special Channel',
-    lastName: '⚡',
-    avatar: 'https://images.unsplash.com/photo-1614680376593-902f749f7ffc?w=150&auto=format&fit=crop&q=80',
-    isBot: true,
-    online: true,
-    lastSeen: 'always active'
   }
 ];
 
@@ -129,21 +119,6 @@ export const INITIAL_MOCK_CONVERSATIONS: ChatConversation[] = [
       isOutgoing: false,
       status: 'delivered'
     }
-  },
-  {
-    id: 'special_direct_bot',
-    user: MOCK_USERS[5],
-    unreadCount: 0,
-    isPinned: true,
-    lastMessage: {
-      id: 'm_sp_01',
-      senderId: 'special_direct_bot',
-      toUser: MOCK_BOT_USER.userId,
-      message: 'Special direct channel active. Send any test message or command.',
-      timestamp: Date.now() - 1000 * 60 * 120,
-      isOutgoing: false,
-      status: 'read'
-    }
   }
 ];
 
@@ -193,26 +168,6 @@ export const INITIAL_MOCK_MESSAGES: Record<string, ChatMessage[]> = {
       toUser: MOCK_BOT_USER.userId,
       message: 'Hey, is the telegram bot running the latest integration?',
       timestamp: Date.now() - 1000 * 60 * 3,
-      isOutgoing: false,
-      status: 'read'
-    }
-  ],
-  'special_direct_bot': [
-    {
-      id: 'm_sp_00',
-      senderId: 'special_direct_bot',
-      toUser: MOCK_BOT_USER.userId,
-      message: '✨ Welcome to Special Direct Bot Channel! Here you can test bot interactions and direct client messages in real time.',
-      timestamp: Date.now() - 1000 * 60 * 200,
-      isOutgoing: false,
-      status: 'read'
-    },
-    {
-      id: 'm_sp_01',
-      senderId: 'special_direct_bot',
-      toUser: MOCK_BOT_USER.userId,
-      message: 'Special direct channel active. Send any test message or command.',
-      timestamp: Date.now() - 1000 * 60 * 120,
       isOutgoing: false,
       status: 'read'
     }

@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { wsService } from '../services/websocket';
-import { createDemoAudioVoice } from '../services/audioRecorder';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload, StickerItem } from '../types/chat';
 import { useAuth } from './AuthContext';
+import { useTheme } from './ThemeContext';
+import { useNotification } from './NotificationContext';
 
 interface ChatContextValue {
   conversations: ChatConversation[];
@@ -15,30 +16,50 @@ interface ChatContextValue {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   selectChat: (chatId: string) => void;
+  unseenChatIds: Record<string, boolean>;
+  isChatUnseen: (chatId: string) => boolean;
+  markChatSeen: (chatId: string) => void;
   sendMessage: (text: string) => Promise<void>;
   sendSticker: (sticker: StickerItem) => Promise<void>;
   sendMedia: (type: 'photo' | 'video' | 'voice', fileOrUrl: File | Blob | string, duration?: number) => Promise<void>;
-  triggerShowcaseEvent?: (eventType: 'text' | 'voice' | 'photo' | 'typing') => Promise<void>;
   archiveChat: (chatId: string, archive?: boolean) => void;
   saveMessageToSaved: (message: ChatMessage) => void;
-  openSpecialChat: () => void;
   openSavedMessages: () => void;
   refreshChats: () => Promise<void>;
-  isSpecialChatOpen: boolean;
-  setIsSpecialChatOpen: (open: boolean) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { account, token, isAuthenticated } = useAuth();
+  const { playSendSound, playReceiveSound } = useTheme();
+  const { notify } = useNotification();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isSpecialChatOpen, setIsSpecialChatOpen] = useState<boolean>(false);
   const [typingChatIds, setTypingChatIds] = useState<Record<string, boolean>>({});
+  const [unseenChatIds, setUnseenChatIds] = useState<Record<string, boolean>>({});
+
+  const markChatSeen = (chatId: string) => {
+    setUnseenChatIds(prev => {
+      if (!prev[chatId]) return prev;
+      const copy = { ...prev };
+      delete copy[chatId];
+      return copy;
+    });
+    setConversations(prev =>
+      prev.map(c => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
+    );
+  };
+
+  const isChatUnseen = (chatId: string) => {
+    if (activeChatId === chatId) return false;
+    if (unseenChatIds[chatId]) return true;
+    const conv = conversations.find(c => c.id === chatId);
+    return Boolean(conv && conv.unreadCount > 0 && !conv.lastMessage?.isOutgoing);
+  };
 
   // Load conversations when authenticated
   useEffect(() => {
@@ -130,8 +151,23 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const updated = [...prev];
           const conv = { ...updated[existingIndex] };
           conv.lastMessage = incomingMsg;
-          if (activeChatId !== chatId && !incomingMsg.isOutgoing) {
-            conv.unreadCount = (conv.unreadCount || 0) + 1;
+          if (!incomingMsg.isOutgoing) {
+            playReceiveSound();
+            if (activeChatId !== chatId) {
+              conv.unreadCount = (conv.unreadCount || 0) + 1;
+              // Secondary glow beacon for unseen person who texted the bot
+              setUnseenChatIds(prevUnseen => ({ ...prevUnseen, [chatId]: true }));
+              const senderName = `${conv.user.firstName} ${conv.user.lastName || ''}`.trim();
+              notify({
+                title: senderName,
+                message: incomingMsg.message || (incomingMsg.media?.type === 'voice' ? '🎤 Voice message' : incomingMsg.media?.type === 'photo' ? '📷 Photo' : 'New incoming message'),
+                type: 'message',
+                avatar: conv.user.avatar,
+                chatId,
+                actionLabel: 'Open Chat',
+                onAction: () => selectChat(chatId)
+              });
+            }
           }
           updated.splice(existingIndex, 1);
           return [conv, ...updated];
@@ -147,37 +183,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const selectChat = (chatId: string) => {
     setActiveChatId(chatId);
-    // Mark as read in local conversation state
-    setConversations(prev =>
-      prev.map(c => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
-    );
+    // Mark as read and stop glowing in secondary color
+    markChatSeen(chatId);
   };
 
-  const openSpecialChat = () => {
-    const specialId = 'special_direct_bot';
-    const found = conversations.find(c => c.id === specialId);
-    if (found) {
-      selectChat(specialId);
-    } else {
-      // Create if not existing
-      const specialConv: ChatConversation = {
-        id: specialId,
-        user: {
-          id: specialId,
-          username: 'special_direct',
-          firstName: 'Special Channel',
-          lastName: '⚡',
-          isBot: true,
-          online: true
-        },
-        unreadCount: 0,
-        isPinned: true
-      };
-      setConversations(prev => [specialConv, ...prev]);
-      selectChat(specialId);
+  // Automatically clear unseen glow when activeChatId is opened
+  useEffect(() => {
+    if (activeChatId) {
+      markChatSeen(activeChatId);
     }
-    setIsSpecialChatOpen(false);
-  };
+  }, [activeChatId]);
 
   const openSavedMessages = () => {
     const savedId = 'saved_messages';
@@ -253,6 +268,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setConversations(prev =>
       prev.map(c => (c.id === savedId ? { ...c, lastMessage: savedMsg } : c))
     );
+
+    notify({
+      title: 'Saved Messages',
+      message: 'Message pinned to personal cloud notes',
+      type: 'success'
+    });
   };
 
   const refreshChats = async () => {
@@ -288,6 +309,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     // Optimistically update message stream
+    playSendSound();
     setMessagesByChat(prev => ({
       ...prev,
       [currentChatId]: [...(prev[currentChatId] || []), newLocalMessage]
@@ -326,37 +348,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           m.id === msgId ? { ...m, status: 'delivered' } : m
         )
       }));
-
-      // In mock mode, simulate automatic response from target user/client after 1.5s
-      if (api.isMockMode() && !wsSent) {
-        setTimeout(() => {
-          const simulatedReply: ChatMessage = {
-            id: 'mock_reply_' + Date.now(),
-            senderId: currentChatId,
-            toUser: account.userId,
-            message: `Received by client: "${text.slice(0, 25)}${text.length > 25 ? '...' : ''}"`,
-            timestamp: Date.now(),
-            isOutgoing: false,
-            status: 'read'
-          };
-
-          setMessagesByChat(prev => ({
-            ...prev,
-            [currentChatId]: [...(prev[currentChatId] || []), simulatedReply]
-          }));
-
-          setConversations(prev => {
-            const idx = prev.findIndex(c => c.id === currentChatId);
-            if (idx >= 0) {
-              const updated = [...prev];
-              const conv = { ...updated[idx], lastMessage: simulatedReply };
-              updated.splice(idx, 1);
-              return [conv, ...updated];
-            }
-            return prev;
-          });
-        }, 1200);
-      }
     } catch (err) {
       console.error('Failed to send message:', err);
     }
@@ -368,6 +359,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendSticker = async (sticker: StickerItem) => {
     if (!activeChatId || !account?.userId) return;
 
+    playSendSound();
     const currentChatId = activeChatId;
     const msgId = 'sticker_' + Date.now();
 
@@ -428,6 +420,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendMedia = async (type: 'photo' | 'video' | 'voice', fileOrUrl: File | Blob | string, duration?: number) => {
     if (!activeChatId || !account?.userId) return;
 
+    playSendSound();
     const currentChatId = activeChatId;
     const msgId = 'media_' + Date.now();
     let mediaUrl = typeof fileOrUrl === 'string' ? fileOrUrl : URL.createObjectURL(fileOrUrl);
@@ -483,8 +476,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const payload: OutgoingBackendPayload = {
       "User-ID": account.userId,
       "to-user": currentChatId,
+      "employee_id": account.userId,
+      "to_userid": currentChatId,
+      "file": mediaUrl,
+      "Action": type === 'photo' ? 'send_photo' : 'send_media',
       "message": "",
-      "action": "send_media",
+      "action": type === 'photo' ? 'send_photo' : 'send_media',
       "media": {
         type,
         url: mediaUrl,
@@ -495,7 +492,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       wsService.send(payload);
-      await api.sendMessage(payload, token || undefined);
+      if (type === 'photo') {
+        await api.sendPhoto({
+          employee_id: account.userId,
+          to_userid: currentChatId,
+          file: mediaUrl,
+          caption: '',
+          action: 'send_photo'
+        }, token || undefined);
+      } else {
+        await api.sendMessage(payload, token || undefined);
+      }
 
       setMessagesByChat(prev => ({
         ...prev,
@@ -503,39 +510,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           m.id === msgId ? { ...m, status: 'delivered' } : m
         )
       }));
-
-      // In mock mode, simulate automatic response from target user/client after 1.5s
-      if (api.isMockMode()) {
-        setTimeout(() => {
-          const simulatedReply: ChatMessage = {
-            id: 'mock_reply_' + Date.now(),
-            senderId: currentChatId,
-            toUser: account.userId,
-            message: type === 'voice' 
-              ? '🎤 Listened to your voice message! Working on it.'
-              : `Received ${type} attachment. Looks good!`,
-            timestamp: Date.now(),
-            isOutgoing: false,
-            status: 'read'
-          };
-
-          setMessagesByChat(prev => ({
-            ...prev,
-            [currentChatId]: [...(prev[currentChatId] || []), simulatedReply]
-          }));
-
-          setConversations(prev => {
-            const idx = prev.findIndex(c => c.id === currentChatId);
-            if (idx >= 0) {
-              const updated = [...prev];
-              const conv = { ...updated[idx], lastMessage: simulatedReply };
-              updated.splice(idx, 1);
-              return [conv, ...updated];
-            }
-            return prev;
-          });
-        }, 1200);
-      }
     } catch (e) {
       console.error('Failed to send media:', e);
     }
@@ -543,105 +517,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const activeConversations = conversations.filter(c => !c.isArchived);
   const archivedConversations = conversations.filter(c => !!c.isArchived);
-
-  /**
-   * Trigger simulated test events for live showcase presentations
-   */
-  const triggerShowcaseEvent = async (eventType: 'text' | 'voice' | 'photo' | 'typing') => {
-    const targetChatId = activeChatId || (activeConversations[0]?.id !== 'saved_messages' ? activeConversations[0]?.id : activeConversations[1]?.id) || 'user_10293847';
-    const targetConv = conversations.find(c => c.id === targetChatId);
-    const senderName = targetConv?.user?.firstName || 'Alex';
-
-    if (eventType === 'typing') {
-      // Simulate typing status
-      setTypingChatIds(prev => ({ ...prev, [targetChatId]: true }));
-      setConversations(prev =>
-        prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'typing...' } } : c)
-      );
-      setTimeout(() => {
-        setTypingChatIds(prev => ({ ...prev, [targetChatId]: false }));
-        setConversations(prev =>
-          prev.map(c => c.id === targetChatId ? { ...c, user: { ...c.user, lastSeen: 'online' } } : c)
-        );
-      }, 3000);
-      return;
-    }
-
-    let showcaseMsg: ChatMessage;
-
-    if (eventType === 'text') {
-      const phrases = [
-        "Hey! Could you confirm if the bot token sync completed successfully?",
-        "Everything looks great on our end! Just testing the Telegram client.",
-        "Quick question: Can we invite more operator IDs into this channel?",
-        "Received your update. Thanks for the quick response!"
-      ];
-      const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
-      showcaseMsg = {
-        id: 'showcase_text_' + Date.now(),
-        senderId: targetChatId,
-        senderName: senderName,
-        toUser: account?.userId || '1234',
-        message: randomPhrase,
-        timestamp: Date.now(),
-        isOutgoing: false,
-        status: 'read'
-      };
-    } else if (eventType === 'voice') {
-      const demoVoice = await createDemoAudioVoice(4);
-      showcaseMsg = {
-        id: 'showcase_voice_' + Date.now(),
-        senderId: targetChatId,
-        senderName: senderName,
-        toUser: account?.userId || '1234',
-        message: '[Voice Note]',
-        timestamp: Date.now(),
-        isOutgoing: false,
-        status: 'read',
-        media: {
-          type: 'voice',
-          url: demoVoice.url,
-          duration: demoVoice.duration
-        }
-      };
-    } else {
-      showcaseMsg = {
-        id: 'showcase_photo_' + Date.now(),
-        senderId: targetChatId,
-        senderName: senderName,
-        toUser: account?.userId || '1234',
-        message: '[Photo]',
-        timestamp: Date.now(),
-        isOutgoing: false,
-        status: 'read',
-        media: {
-          type: 'photo',
-          url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
-          fileName: 'analytics_report.jpg'
-        }
-      };
-    }
-
-    setMessagesByChat(prev => ({
-      ...prev,
-      [targetChatId]: [...(prev[targetChatId] || []), showcaseMsg]
-    }));
-
-    setConversations(prev => {
-      const idx = prev.findIndex(c => c.id === targetChatId);
-      if (idx >= 0) {
-        const updated = [...prev];
-        const updatedConv = {
-          ...updated[idx],
-          lastMessage: showcaseMsg,
-          unreadCount: (updated[idx].unreadCount || 0) + 1
-        };
-        updated.splice(idx, 1);
-        return [updatedConv, ...updated];
-      }
-      return prev;
-    });
-  };
 
   const activeChat = conversations.find(c => c.id === activeChatId) || null;
   const activeMessages = (activeChatId ? messagesByChat[activeChatId] : []) || [];
@@ -662,17 +537,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         searchQuery,
         setSearchQuery,
         selectChat,
+        unseenChatIds,
+        isChatUnseen,
+        markChatSeen,
         sendMessage,
         sendSticker,
         sendMedia,
-        triggerShowcaseEvent,
         archiveChat,
         saveMessageToSaved,
-        openSpecialChat,
         openSavedMessages,
-        refreshChats,
-        isSpecialChatOpen,
-        setIsSpecialChatOpen
+        refreshChats
       }}
     >
       {children}

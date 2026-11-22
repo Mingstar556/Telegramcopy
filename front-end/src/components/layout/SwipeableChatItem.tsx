@@ -11,6 +11,7 @@ interface SwipeableChatItemProps {
   onArchive: (chatId: string) => void;
   onUnarchive?: (chatId: string) => void;
   isArchivedMode?: boolean;
+  isUnseen?: boolean;
 }
 
 const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
@@ -19,10 +20,14 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
   onSelect,
   onArchive,
   onUnarchive,
-  isArchivedMode = false
+  isArchivedMode = false,
+  isUnseen: isUnseenProp
 }) => {
   const { theme } = useTheme();
   const isGold = theme === 'black-gold';
+
+  // Secondary glowing state: active when someone text the bot and user hasn't seen that person
+  const isUnseen = !isActive && (isUnseenProp ?? (chat.unreadCount > 0 && !chat.lastMessage?.isOutgoing));
 
   const [translateX, setTranslateX] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -183,19 +188,19 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
       <div
         style={{
           transform: `translate3d(${translateX}px, 0, 0)`,
-          transition: isSwiping ? 'none' : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1)'
+          transition: isSwiping ? 'none' : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1), background-color 200ms ease, box-shadow 300ms ease, border-color 300ms ease'
         }}
-        className={`relative z-10 w-full p-2.5 rounded-2xl flex items-center gap-3 text-left transition-colors duration-150 cursor-pointer ${
+        className={`relative z-10 w-full p-2.5 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all duration-300 ${
           isActive
             ? isGold
               ? 'bg-[#1c180e] border border-[#e5b842]/35 shadow-sm'
-              : 'bg-white/[0.08] border border-white/10 shadow-sm'
-            : isGold
-            ? 'bg-[#090807] hover:bg-[#14120a] border border-transparent'
-            : 'bg-[#0e0e11] hover:bg-white/[0.04] border border-transparent'
+              : 'bg-[var(--color-active-item)] border border-[var(--color-accent)]/30 shadow-sm'
+            : isUnseen
+            ? 'unseen-person-item border border-[var(--color-secondary-border)]'
+            : 'hover:bg-white/[0.04] border border-transparent'
         }`}
       >
-        {/* Avatar */}
+        {/* Avatar with optional Secondary Glow Beacon */}
         <Avatar
           id={chat.user.id}
           name={fullName}
@@ -203,13 +208,22 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
           size="md"
           isOnline={chat.user.online}
           isSavedMessages={chat.isSavedMessages}
+          isGlow={isUnseen}
         />
 
         {/* Content Details */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-0.5">
             <span className="font-semibold text-sm truncate flex items-center gap-1.5 tracking-tight">
-              <span>{fullName}</span>
+              {/* Secondary Aura Beacon Dot when Unseen */}
+              {isUnseen && (
+                <span className="relative flex h-2 w-2 mr-0.5 flex-shrink-0" title="New unseen message">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--color-secondary)] opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--color-secondary)] shadow-[0_0_8px_var(--color-secondary)]" />
+                </span>
+              )}
+
+              <span className={isUnseen ? 'text-white font-bold' : ''}>{fullName}</span>
 
               {chat.isSavedMessages && (
                 <Bookmark className="w-3.5 h-3.5 text-[#2aabee] fill-[#2aabee] inline flex-shrink-0" />
@@ -220,7 +234,9 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
               )}
             </span>
 
-            <span className="text-[11px] text-[var(--color-text-muted)] flex-shrink-0 ml-1 font-mono">
+            <span className={`text-[11px] flex-shrink-0 ml-1 font-mono ${
+              isUnseen ? 'text-[var(--color-secondary)] font-semibold' : 'text-[var(--color-text-muted)]'
+            }`}>
               {lastMsgTime}
             </span>
           </div>
@@ -228,7 +244,7 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
           {/* Subtitle & Last Message */}
           <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
             <div className="flex items-center gap-1.5 truncate pr-2">
-              <p className="truncate leading-relaxed">
+              <p className={`truncate leading-relaxed ${isUnseen ? 'text-zinc-200 font-medium' : ''}`}>
                 {chat.lastMessage?.isOutgoing && (
                   <span className="text-[var(--color-accent)] font-medium mr-1">You:</span>
                 )}
@@ -249,10 +265,12 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
 
               {chat.unreadCount > 0 && (
                 <span
-                  className={`min-w-4 h-4 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center shadow-sm ${
-                    isGold
+                  className={`min-w-4 h-4 px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center transition-all duration-300 ${
+                    isUnseen
+                      ? 'bg-[var(--color-secondary)] text-white font-extrabold shadow-[0_0_12px_var(--color-secondary-glow)] animate-pulse'
+                      : isGold
                       ? 'bg-[#e5b842] text-black font-extrabold shadow-[#e5b842]/20'
-                      : 'bg-[#2aabee] text-white shadow-[#2aabee]/25'
+                      : 'bg-[var(--color-unread-badge)] text-[var(--color-accent-text)] shadow-[var(--color-accent-glow)]'
                   }`}
                 >
                   {chat.unreadCount}

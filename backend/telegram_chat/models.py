@@ -118,6 +118,7 @@ class ChatMessage(models.Model):
         ('send_message', 'Text Message'),
         ('send_sticker', 'Sticker'),
         ('send_media', 'Media'),
+        ('send_photo', 'Photo'),
     ]
     STATUS_CHOICES = [
         ('pending', 'Pending'),

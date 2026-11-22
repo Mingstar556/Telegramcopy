@@ -14,18 +14,17 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Avatar } from '../common/Avatar';
+import { QuickAppearancePopover } from '../common/QuickAppearancePopover';
 import { ThreeDotsMenu } from '../modals/ThreeDotsMenu';
 import { SwipeableChatItem } from './SwipeableChatItem';
 
 interface SidebarProps {
   onOpenAccount: () => void;
-  onOpenSpecial: () => void;
   onOpenSettings: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAccount,
-  onOpenSpecial,
   onOpenSettings
 }) => {
   const { account } = useAuth();
@@ -34,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     archivedConversations,
     activeChat,
     selectChat,
+    isChatUnseen,
     searchQuery,
     setSearchQuery,
     archiveChat,
@@ -57,9 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`w-full md:w-80 lg:w-[370px] flex flex-col h-full border-r border-[var(--color-border)] select-none transition-colors duration-200 ${
-        isGold ? 'bg-[#090807]' : 'bg-[#0e0e11]'
-      }`}
+      className="w-full md:w-80 lg:w-[370px] flex flex-col h-full border-r border-[var(--color-border)] select-none transition-colors duration-200 bg-[var(--color-bg-sidebar)]"
     >
       {/* Top Header - Employee Portal Identifier */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--color-border)] glass-header relative z-20">
@@ -90,7 +88,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Action Header Icons */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {/* Quick Appearance Customizer for PC */}
+          <QuickAppearancePopover onOpenFullSettings={onOpenSettings} className="hidden sm:block" />
+
           {/* 3-Dots Menu Trigger */}
           <div className="relative">
             <button
@@ -109,7 +110,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               isOpen={isMenuOpen}
               onClose={() => setIsMenuOpen(false)}
               onOpenAccount={onOpenAccount}
-              onOpenSpecial={onOpenSpecial}
               onOpenSettings={onOpenSettings}
             />
           </div>
@@ -122,7 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`flex items-center gap-2.5 px-3.5 py-2 rounded-2xl border text-xs transition-all duration-200 ${
             isGold
               ? 'bg-[#12110c] border-[#38301a]/70 focus-within:border-[#e5b842] focus-within:ring-2 focus-within:ring-[#e5b842]/20'
-              : 'bg-[#15161b] border-white/5 focus-within:border-[#2aabee]/70 focus-within:ring-2 focus-within:ring-[#2aabee]/20'
+              : 'bg-[var(--color-bg-input)] border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-glow)]'
           }`}
         >
           <Search className="w-3.5 h-3.5 text-[var(--color-text-muted)] flex-shrink-0" />
@@ -144,8 +144,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Chat List Scroll Area */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-1 py-1">
+      {/* Chat List Scroll Area (pb-28 on mobile so bottom chats are never covered by floating nav bar) */}
+      <div className="flex-1 overflow-y-auto px-2 space-y-1 py-1 pb-28 md:pb-3">
         {/* Archived Chats Folder (if any chats are archived) */}
         {archivedConversations.length > 0 && (
           <div className="mb-2">
@@ -197,6 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     key={chat.id}
                     chat={chat}
                     isActive={activeChat?.id === chat.id}
+                    isUnseen={isChatUnseen(chat.id)}
                     onSelect={() => selectChat(chat.id)}
                     onArchive={() => {}}
                     onUnarchive={(id) => archiveChat(id, false)}
@@ -231,6 +232,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               key={chat.id}
               chat={chat}
               isActive={activeChat?.id === chat.id}
+              isUnseen={isChatUnseen(chat.id)}
               onSelect={() => selectChat(chat.id)}
               onArchive={(id) => archiveChat(id, true)}
             />

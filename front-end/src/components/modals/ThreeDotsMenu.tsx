@@ -8,7 +8,6 @@ interface ThreeDotsMenuProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenAccount: () => void;
-  onOpenSpecial: () => void;
   onOpenSettings: () => void;
 }
 
@@ -16,7 +15,6 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
   isOpen,
   onClose,
   onOpenAccount,
-  onOpenSpecial,
   onOpenSettings
 }) => {
   const { logout, account } = useAuth();
@@ -86,23 +84,6 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
         <span>Account</span>
       </button>
 
-      {/* Special */}
-      <button
-        onClick={() => {
-          onClose();
-          onOpenSpecial();
-        }}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl hover:bg-white/[0.06] transition-colors btn-press text-left"
-      >
-        <div className="flex items-center gap-3">
-          <Sparkles className="w-4 h-4 text-[var(--color-accent)]" />
-          <span>Special</span>
-        </div>
-        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/20 text-[var(--color-accent)] font-mono">
-          SLOT
-        </span>
-      </button>
-
       {/* Settings */}
       <button
         onClick={() => {
@@ -117,20 +98,22 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
 
       <div className="my-1 border-t border-white/5" />
 
-      {/* Quick Theme Toggle */}
+      {/* Themes & Customization */}
       <button
-        onClick={() => setTheme(isGold ? 'simple-black' : 'black-gold')}
+        onClick={() => {
+          onClose();
+          onOpenSettings();
+        }}
         className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl hover:bg-white/[0.06] transition-colors btn-press text-left"
       >
         <div className="flex items-center gap-2.5">
           <div
-            className={`w-3 h-3 rounded-full border ${
-              isGold ? 'bg-[#e5b842] border-[#f3c853]' : 'bg-[#2aabee] border-white/40'
-            }`}
+            className="w-3 h-3 rounded-full border border-white/40 shadow-sm"
+            style={{ backgroundColor: 'var(--color-accent)' }}
           />
-          <span className="text-xs">{isGold ? 'Black & Gold' : 'Simple Black'}</span>
+          <span className="text-xs">Customize Theme</span>
         </div>
-        <Check className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+        <span className="text-[10px] text-[var(--color-accent)] font-semibold">8 Styles</span>
       </button>
 
       <div className="my-1 border-t border-white/5" />

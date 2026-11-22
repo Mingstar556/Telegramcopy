@@ -292,17 +292,28 @@ class TelegramBotGateway:
             if media_dict and media_dict.get('type') == 'photo':
                 photo_url = media_dict.get('url', '')
                 url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendPhoto"
+                local_path = None
                 if '/media/uploads/' in photo_url:
                     local_filename = photo_url.split('/media/uploads/')[-1]
-                    local_path = settings.MEDIA_ROOT / 'uploads' / local_filename
-                    if os.path.exists(local_path):
-                        with open(local_path, 'rb') as f:
-                            files = {'photo': f}
-                            data = {'chat_id': chat_id}
-                            if text:
-                                data['caption'] = text
-                            resp = requests.post(url, data=data, files=files, timeout=15)
-                            return resp.json()
+                    candidate = settings.MEDIA_ROOT / 'uploads' / local_filename
+                    if os.path.exists(candidate):
+                        local_path = candidate
+                elif photo_url and not photo_url.startswith(('http://', 'https://')):
+                    if os.path.exists(photo_url):
+                        local_path = photo_url
+                    elif os.path.exists(settings.MEDIA_ROOT / photo_url):
+                        local_path = settings.MEDIA_ROOT / photo_url
+                    elif os.path.exists(settings.MEDIA_ROOT / 'uploads' / os.path.basename(photo_url)):
+                        local_path = settings.MEDIA_ROOT / 'uploads' / os.path.basename(photo_url)
+
+                if local_path and os.path.exists(local_path):
+                    with open(local_path, 'rb') as f:
+                        files = {'photo': f}
+                        data = {'chat_id': chat_id}
+                        if text:
+                            data['caption'] = text
+                        resp = requests.post(url, data=data, files=files, timeout=15)
+                        return resp.json()
                 payload = {'chat_id': chat_id, 'photo': photo_url}
                 if text:
                     payload['caption'] = text

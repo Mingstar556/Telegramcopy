@@ -100,38 +100,84 @@ B. Telegram Auto-Sync Engine:
   it to all active device sessions.
 
 ================================================================================
-4. DIRECTORY & FILE ORGANIZATION
+4. DIRECTORY & REPOSITORY TOPOLOGY
 ================================================================================
-Telegramplugin-front/
-├── backend/
-│   ├── backend/               # Django project core (settings, asgi, wsgi, urls)
-│   ├── telegram_chat/         # Main chat application
-│   │   ├── migrations/        # Database migrations (OOP Schema & Multi-Device)
-│   │   ├── management/        # Seed command: python manage.py init_test_operator
-│   │   ├── tests/             # Comprehensive 118-test offline test suite
-│   │   ├── models.py          # OOP models (EmployeeAccount, DeviceSession, etc.)
-│   │   ├── views.py           # REST API endpoints (Auth, Chats, Sync, Sessions)
-│   │   ├── consumers.py       # WebSocket consumer for real-time messaging
-│   │   ├── bot_service.py     # Telegram Bot Gateway & sync logic
-│   │   └── urls.py            # API routing table
-│   ├── media/                 # Uploaded media (voices, photos, files)
-│   ├── db.sqlite3             # SQLite database file
-│   ├── manage.py              # Django management script
-│   └── requirements.txt       # Python dependencies
-├── front-end/
-│   ├── src/
-│   │   ├── components/        # UI components (ChatArea, Sidebar, MessageList, Auth)
-│   │   ├── contexts/          # React contexts (AuthContext, ChatContext, ThemeContext)
-│   │   ├── services/          # API client (api.ts) & WebSocket manager (websocket.ts)
-│   │   ├── types/             # TypeScript interfaces for Chat, User, Message
-│   │   └── index.css          # Modern styling, animations, smooth scrollbars
-│   ├── package.json           # Frontend dependencies & scripts
-│   └── vite.config.ts         # Vite build configuration & backend proxy
-├── APP_EXPLANATION.txt        # This architecture and operations manual
-└── package.json               # Root scripts to start backend & frontend simultaneously
+The project is strictly split into two independent domains for maximum security:
+
+A. Server Repository (TBOTchat-server):
+--------------------------------------------------------------------------------
+Dedicated to the 24/7 host machine. Contains server backend, business logic,
+database, and administrative tooling. NEVER distribute to employees.
+
+TBOTchat-server/
+├── backend/                   # Django 5 + Channels + Daphne ASGI
+│   ├── backend/               # Settings, ASGI/WSGI, root URL routing
+│   │   └── settings.py        # ALLOWED_HOSTS=['*'], CORS permissive for remote clients
+│   ├── telegram_chat/         # Core application logic
+│   │   ├── models.py          # EmployeeAccount, DeviceSession, BotAccount, etc.
+│   │   ├── views.py           # REST endpoints (/api/auth/, /api/health/, etc.)
+│   │   ├── consumers.py       # WebSocket streaming consumer (/ws/chat/)
+│   │   └── bot_service.py     # Telegram Bot API sync and dispatch
+│   ├── db.sqlite3             # 24/7 operational database (ACID compliant)
+│   └── manage.py              # Administrative entry point
+├── front-end/                 # Source TypeScript + React web application
+│   ├── src/                   # React 19 source tree
+│   │   ├── components/common/NoSignalScreen.tsx # Interactive server setup & radar
+│   │   └── services/api.ts    # Dynamic server URL resolution & storage
+│   └── dist/                  # Compiled production static build
+├── desktop_app.py             # Desktop wrapper & local API server (POST /api/save_config)
+├── connect_server.py          # Standalone server connection & health probe tool
+├── TBOTchat_onefile.spec      # PyInstaller spec for packed single-file client
+├── START_ALL.bat              # 1-Click host launcher (Daphne 0.0.0.0:8000 + Frontend)
+├── STOP_ALL.bat               # 1-Click process terminator (ports 8000 & 5173)
+├── icon.ico                   # Application Telegram paper airplane icon
+├── AI_README.md               # Strict architectural guide for future AI agents
+└── APP_EXPLANATION.txt        # This complete system manual
+
+B. Public Employee Distribution (TBOTchat-pubilc):
+--------------------------------------------------------------------------------
+Zero-sensitive-data folder designed for company employees on any PC. Contains
+NO code, NO database, NO bot tokens, and NO administrative scripts.
+
+TBOTchat-pubilc/
+├── TBOTchat.exe               # 17MB single-file standalone client (no Python required)
+├── UserBot_chat.exe           # Backward-compatible alias executable
+├── Connect_Server.exe         # Standalone CLI tool to probe & configure server address
+├── config.json                # Server address configuration (auto-persisted)
+├── icon.ico                   # App icon
+└── EMPLOYEE_GUIDE.txt         # Simple non-technical employee onboarding manual
 
 ================================================================================
-5. HOW TO RUN AND TEST LOCALLY
+5. 24/7 SERVER HOSTING & REMOTE CONNECTIVITY
+================================================================================
+The backend runs 24/7 on a central Server PC. Remote employees can connect from
+any network (office LAN, home Wi-Fi, or mobile hotspot).
+
+Server PC Setup:
+1. Double-click START_ALL.bat (or host backend via Daphne on port 8000).
+2. Choose a method to expose the Server PC to remote employees:
+   - Method 1: Cloudflare Tunnel (Recommended - Zero Router Config & Free HTTPS):
+     Run: cloudflared tunnel --url http://127.0.0.1:8000
+     Provides: https://chat.yourcompany.com with automatic HTTPS and WSS.
+   - Method 2: Router Port Forwarding:
+     Forward TCP port 8000 on your router to the Server PC's LAN IP address.
+     Provides: http://<PUBLIC_IP>:8000
+   - Method 3: Tailscale / WireGuard VPN:
+     Add Server PC and employee devices to the private VPN mesh network.
+     Provides: http://<SERVER_TAILSCALE_IP>:8000
+
+Client First-Run Automated Setup:
+1. Employee launches TBOTchat.exe on their PC.
+2. If first run or server not yet configured, the app immediately displays the
+   server address setup form on screen.
+3. Employee inputs the company server address (e.g. https://chat.company.com or
+   http://192.168.1.100:8000) and clicks "Save & Connect".
+4. The app runs a live health check (/api/health/), syncs config.json via
+   POST /api/save_config, updates localStorage, and transitions to Login.
+5. All future launches connect directly to the 24/7 server without prompting!
+
+================================================================================
+6. HOW TO RUN AND TEST LOCALLY
 ================================================================================
 
 Prerequisites:

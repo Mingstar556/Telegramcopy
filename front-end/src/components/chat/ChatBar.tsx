@@ -1,14 +1,16 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check, AlertCircle } from 'lucide-react';
+import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { audioRecorder, createDemoAudioVoice } from '../../services/audioRecorder';
+import { useNotification } from '../../contexts/NotificationContext';
+import { audioRecorder } from '../../services/audioRecorder';
 import { MediaAttachmentModal } from './MediaAttachmentModal';
 import { StickerPicker } from './StickerPicker';
 
 export const ChatBar: React.FC = () => {
   const { sendMessage, sendMedia, activeChat } = useChat();
   const { theme, settings } = useTheme();
+  const { notify } = useNotification();
 
   const [text, setText] = useState('');
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
@@ -17,7 +19,6 @@ export const ChatBar: React.FC = () => {
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [micError, setMicError] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -52,7 +53,10 @@ export const ChatBar: React.FC = () => {
     setText(e.target.value);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+      // Only expand if multiple lines, capped cleanly at 110px
+      if (e.target.value.includes('\n') || textareaRef.current.scrollHeight > 40) {
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 110)}px`;
+      }
     }
   };
 
@@ -66,9 +70,7 @@ export const ChatBar: React.FC = () => {
   };
 
   const startVoiceRecording = async () => {
-    setMicError(null);
     try {
-      setMicError(null);
       await audioRecorder.startRecording();
       setIsRecording(true);
       setRecordingSeconds(0);
@@ -78,21 +80,16 @@ export const ChatBar: React.FC = () => {
     } catch (err: unknown) {
       console.warn('Microphone start error:', err);
       const errMsg = err instanceof Error ? err.message : 'Microphone not accessible';
-      if (errMsg.toLowerCase().includes('permission') || errMsg.toLowerCase().includes('allowed')) {
-        setMicError('Microphone permission denied. Please allow microphone access in your browser settings.');
-      } else {
-        setMicError('Microphone not detected or not supported in this browser tab. You can click to send a demo voice sample.');
-      }
-    }
-  };
+      const isPermissionDenied = errMsg.toLowerCase().includes('permission') || errMsg.toLowerCase().includes('allowed');
 
-  const handleSendDemoVoiceNote = async () => {
-    setMicError(null);
-    try {
-      const demoResult = await createDemoAudioVoice(3);
-      await sendMedia('voice', demoResult.blob, demoResult.duration);
-    } catch (e) {
-      console.error('Failed to send demo voice note:', e);
+      notify({
+        title: isPermissionDenied ? 'Microphone Permission Needed' : 'Microphone Unavailable',
+        message: isPermissionDenied
+          ? 'Please enable microphone access in your browser or device settings.'
+          : 'Microphone hardware was not detected or is busy in another app.',
+        type: 'alert',
+        duration: 4000
+      });
     }
   };
 
@@ -105,9 +102,23 @@ export const ChatBar: React.FC = () => {
 
     try {
       const result = await audioRecorder.stopRecording();
+      if (result.duration < 0.6) {
+        notify({
+          title: 'Voice Recording',
+          message: 'Audio too short. Hold or click to record a longer message.',
+          type: 'alert',
+          duration: 2500
+        });
+        return;
+      }
       await sendMedia('voice', result.blob, result.duration);
-    } catch (e) {
-      console.error('Failed to capture audio:', e);
+    } catch (err) {
+      console.error('Error stopping recording:', err);
+      notify({
+        title: 'Recording Error',
+        message: 'Failed to capture voice audio.',
+        type: 'alert'
+      });
     }
   };
 
@@ -121,75 +132,46 @@ export const ChatBar: React.FC = () => {
     setRecordingSeconds(0);
   };
 
-  const formatTimer = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  const formatTimer = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   return (
-    <div className="relative px-3 py-2.5 sm:px-6 sm:py-3.5 border-t border-[var(--color-border)] glass-header select-none z-20 transition-colors duration-200">
-      {/* Sticker Picker Popup */}
+    <div className="relative px-2.5 sm:px-6 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[var(--color-bg-chat)] border-t border-[var(--color-border)] select-none transition-colors duration-200">
+      {/* Sticker and Emoji Picker popover */}
       <StickerPicker
         isOpen={isStickerPickerOpen}
         onClose={() => setIsStickerPickerOpen(false)}
         onSelectEmoji={handleSelectEmoji}
       />
 
-      {/* Media Attachment Action Sheet */}
+      {/* Media Attachment Modal */}
       <MediaAttachmentModal
         isOpen={isAttachmentOpen}
         onClose={() => setIsAttachmentOpen(false)}
         onSelectMedia={handleSelectMedia}
       />
 
-      {/* Mic Warning & Demo Trigger Banner */}
-      {micError && (
-        <div className="mb-2 max-w-5xl mx-auto flex items-center justify-between gap-2 p-2 px-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs animate-fade-in">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-            <span>{micError}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSendDemoVoiceNote}
-              className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-semibold hover:bg-amber-400 transition text-[11px] whitespace-nowrap btn-press"
-            >
-              Send Demo Voice
-            </button>
-            <button
-              type="button"
-              onClick={() => setMicError(null)}
-              className="text-amber-300 hover:text-white text-xs px-1"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-end gap-2 max-w-5xl mx-auto">
-        {/* Menu Button */}
+      {/* Main Single Row Controls */}
+      <div className="flex items-center gap-1.5 sm:gap-2 max-w-5xl mx-auto w-full">
+        {/* Bot Menu Button - Hidden on mobile so input capsule has maximum width and consistent line */}
         <button
           type="button"
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
-            isGold
-              ? 'text-[#e5b842] hover:bg-[#e5b842]/10'
-              : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
-          }`}
+          className="hidden sm:flex w-11 h-11 rounded-full items-center justify-center transition-all duration-150 flex-shrink-0 btn-press text-[var(--color-text-muted)] hover:text-white hover:bg-white/5"
           title="Bot Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Paperclip Button */}
+        {/* Attachment Button */}
         <button
           type="button"
           onClick={() => setIsAttachmentOpen(!isAttachmentOpen)}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
+          className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
             isAttachmentOpen
-              ? 'text-[var(--color-accent)] bg-white/10'
+              ? 'text-[var(--color-accent)] bg-[var(--color-accent)]/15 ring-1 ring-[var(--color-accent)]/30'
               : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
           }`}
           title="Attach Photo or Video"
@@ -197,15 +179,24 @@ export const ChatBar: React.FC = () => {
           <Paperclip className="w-5 h-5 rotate-45" />
         </button>
 
-        {/* Recording Mode Indicator vs Input Field */}
+        {/* Recording Mode Pill vs Text Capsule */}
         {isRecording ? (
-          <div className="flex-1 flex items-center justify-between h-11 px-4 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 animate-slide-up">
+          <div className="flex-1 flex items-center justify-between h-11 px-4 rounded-full bg-red-500/10 border border-red-500/30 text-red-300 animate-slide-up shadow-inner">
             <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-soft-pulse" />
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
               <span className="text-xs font-semibold">Recording:</span>
               <span className="font-mono font-bold text-sm text-white">
                 {formatTimer(recordingSeconds)}
               </span>
+
+              {/* Live Animated Equalizer Soundwaves */}
+              <div className="hidden sm:flex items-center gap-1 h-5 px-2">
+                <span className="w-1 bg-red-400 rounded-full animate-soundwave-1" />
+                <span className="w-1 bg-red-400 rounded-full animate-soundwave-2" />
+                <span className="w-1 bg-red-400 rounded-full animate-soundwave-3" />
+                <span className="w-1 bg-red-400 rounded-full animate-soundwave-4" />
+                <span className="w-1 bg-red-400 rounded-full animate-soundwave-5" />
+              </div>
             </div>
 
             <button
@@ -219,12 +210,13 @@ export const ChatBar: React.FC = () => {
           </div>
         ) : (
           <div
-            className={`flex-1 flex items-end rounded-[24px] px-3.5 py-1 border transition-all duration-200 ${
+            className={`flex-1 flex items-center rounded-full sm:rounded-[24px] px-3.5 py-1 min-h-[44px] max-h-36 border transition-all duration-200 shadow-sm ${
               isGold
                 ? 'bg-[#0f0e0a] border-[#38301a]/80 focus-within:border-[#e5b842] focus-within:ring-2 focus-within:ring-[#e5b842]/20'
-                : 'bg-[#121317] border-white/5 focus-within:border-[#2aabee]/70 focus-within:ring-2 focus-within:ring-[#2aabee]/20'
+                : 'bg-[var(--color-bg-input)] border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-glow)]'
             }`}
           >
+            {/* Native Appearance Stripped Textarea (No native browser inset box) */}
             <textarea
               ref={textareaRef}
               rows={1}
@@ -232,16 +224,25 @@ export const ChatBar: React.FC = () => {
               onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={`Message ${activeChat.user.firstName}...`}
-              className="w-full bg-transparent text-sm resize-none outline-none max-h-32 text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] py-2 leading-relaxed tracking-tight"
+              style={{
+                border: 'none',
+                outline: 'none',
+                boxShadow: 'none',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                appearance: 'none',
+                background: 'transparent'
+              }}
+              className="w-full bg-transparent border-0 outline-none shadow-none ring-0 focus:ring-0 focus:outline-none appearance-none text-base sm:text-sm resize-none max-h-32 text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] py-1.5 leading-snug tracking-tight"
             />
 
             {/* Emoji Button */}
             <button
               type="button"
               onClick={() => setIsStickerPickerOpen(!isStickerPickerOpen)}
-              className={`p-1.5 rounded-full transition-all duration-150 flex-shrink-0 btn-press ${
+              className={`p-1.5 rounded-full transition-all duration-150 flex-shrink-0 btn-press ml-1 ${
                 isStickerPickerOpen
-                  ? 'text-[var(--color-accent)]'
+                  ? 'text-[var(--color-accent)] bg-[var(--color-accent)]/15'
                   : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
               }`}
               title="Emojis"
@@ -256,11 +257,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={finishVoiceRecording}
-            className={`w-10 h-10 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press ${
-              isGold
-                ? 'bg-[#e5b842] text-black font-bold shadow-[#e5b842]/20'
-                : 'bg-emerald-500 text-white shadow-emerald-500/25'
-            }`}
+            className="w-11 h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press bg-emerald-500 text-white shadow-emerald-500/30 hover:bg-emerald-400"
             title="Send Voice Note"
           >
             <Check className="w-5 h-5 stroke-[2.5]" />
@@ -269,11 +266,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={handleSendText}
-            className={`w-10 h-10 rounded-full shadow-md flex items-center justify-center flex-shrink-0 btn-press ${
-              isGold
-                ? 'bg-[#e5b842] text-black hover:bg-[#f3c853] shadow-[#e5b842]/20 font-bold'
-                : 'bg-[#2aabee] text-white hover:bg-[#38bdf8] shadow-[#2aabee]/25'
-            }`}
+            className="w-11 h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press btn-glow animate-send-pop bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:bg-[var(--color-accent-hover)] shadow-[var(--color-accent-glow)] font-bold"
             title="Send Message"
           >
             <Send className="w-4 h-4 ml-0.5" />
@@ -282,11 +275,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={startVoiceRecording}
-            className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors btn-press ${
-              isGold
-                ? 'text-[#e5b842] hover:bg-[#e5b842]/10'
-                : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
-            }`}
+            className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors btn-press text-[var(--color-text-muted)] hover:text-white hover:bg-white/5"
             title="Voice Note"
           >
             <Mic className="w-5 h-5" />
