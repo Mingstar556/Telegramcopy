@@ -395,8 +395,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const isCurrentActive = activeChatIdRef.current === chatId;
 
-      // Append message to chat
+      // Append message to chat (with group of photos / album support)
       let isDuplicate = false;
+      let effectiveMsg = incomingMsg;
+
       setMessagesByChat(prev => {
         const chatMsgs = prev[chatId] || [];
         if (chatMsgs.some(m => m.id === incomingMsg.id)) {
@@ -416,6 +418,69 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
+        // Group photos: if incoming message has mediaGroupId or is part of a media group
+        const isPhoto = incomingMsg.media?.type === 'photo';
+        if (isPhoto && incomingMsg.mediaGroupId) {
+          const albumMsgIdx = chatMsgs.findIndex(
+            m => m.mediaGroupId === incomingMsg.mediaGroupId
+          );
+          if (albumMsgIdx >= 0) {
+            const updated = [...chatMsgs];
+            const parentMsg = { ...updated[albumMsgIdx] };
+            const existingAlbum = parentMsg.album || (parentMsg.media ? [parentMsg.media] : []);
+            
+            // If incoming photo URL not in album yet, append it
+            const newPhotoUrl = incomingMsg.media!.url;
+            if (!existingAlbum.some(p => p.url === newPhotoUrl)) {
+              parentMsg.album = [...existingAlbum, incomingMsg.media!];
+            }
+            if (!parentMsg.message && incomingMsg.message) {
+              parentMsg.message = incomingMsg.message;
+            }
+            parentMsg.timestamp = Math.max(parentMsg.timestamp, incomingMsg.timestamp);
+            updated[albumMsgIdx] = parentMsg;
+            effectiveMsg = parentMsg;
+            return { ...prev, [chatId]: updated };
+          }
+
+          // First photo in this media group: initialize album array
+          const initialAlbumMsg: ChatMessage = {
+            ...incomingMsg,
+            album: incomingMsg.album && incomingMsg.album.length > 0 ? incomingMsg.album : [incomingMsg.media!]
+          };
+          effectiveMsg = initialAlbumMsg;
+          return {
+            ...prev,
+            [chatId]: [...chatMsgs, initialAlbumMsg]
+          };
+        }
+
+        // Fallback photo grouping for rapid consecutive incoming photos from same sender (< 3.0s)
+        if (isPhoto && !incomingMsg.isOutgoing && chatMsgs.length > 0) {
+          const lastMsgIdx = chatMsgs.length - 1;
+          const lastMsg = chatMsgs[lastMsgIdx];
+          const isSameSender = !lastMsg.isOutgoing && lastMsg.senderId === incomingMsg.senderId;
+          const isLastPhoto = (lastMsg.media?.type === 'photo' || Boolean(lastMsg.album && lastMsg.album.length > 0));
+          const isRecent = Math.abs(incomingMsg.timestamp - lastMsg.timestamp) < 3000;
+
+          if (isSameSender && isLastPhoto && isRecent) {
+            const updated = [...chatMsgs];
+            const parentMsg = { ...lastMsg };
+            const existingAlbum = parentMsg.album || (parentMsg.media ? [parentMsg.media] : []);
+            const newPhotoUrl = incomingMsg.media!.url;
+            if (!existingAlbum.some(p => p.url === newPhotoUrl)) {
+              parentMsg.album = [...existingAlbum, incomingMsg.media!];
+            }
+            if (!parentMsg.message && incomingMsg.message) {
+              parentMsg.message = incomingMsg.message;
+            }
+            parentMsg.timestamp = Math.max(parentMsg.timestamp, incomingMsg.timestamp);
+            updated[lastMsgIdx] = parentMsg;
+            effectiveMsg = parentMsg;
+            return { ...prev, [chatId]: updated };
+          }
+        }
+
         return {
           ...prev,
           [chatId]: [...chatMsgs, incomingMsg]
@@ -425,8 +490,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isDuplicate) return;
 
       // Update conversations list (OR CREATE NEW CONVERSATION IF NEW USER TEXTS!)
-      let senderName = incomingMsg.senderName || `User ${chatId}`;
-      let senderAvatar = incomingMsg.senderAvatar;
+      let senderName = effectiveMsg.senderName || `User ${chatId}`;
+      let senderAvatar = effectiveMsg.senderAvatar;
 
       setConversations(prev => {
         const existingIndex = prev.findIndex(c => c.id === chatId);
@@ -434,7 +499,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (existingIndex >= 0) {
           const updated = [...prev];
           const conv = { ...updated[existingIndex] };
-          conv.lastMessage = incomingMsg;
+          conv.lastMessage = effectiveMsg;
           if (incomingMsg.senderAvatar && (!conv.user.avatar || conv.user.avatar !== incomingMsg.senderAvatar)) {
             conv.user = { ...conv.user, avatar: incomingMsg.senderAvatar };
           }

@@ -291,13 +291,18 @@ class ApiService {
     }
 
     const rawMsgs = await res.json();
-    return (rawMsgs || []).map((msg: ChatMessage) => ({
+    return (rawMsgs || []).map((msg: any) => ({
       ...msg,
       senderAvatar: resolveMediaUrl(msg.senderAvatar),
       media: msg.media ? {
         ...msg.media,
         url: resolveMediaUrl(msg.media.url)
-      } : undefined
+      } : undefined,
+      album: Array.isArray(msg.album) ? msg.album.map((item: any) => ({
+        ...item,
+        url: resolveMediaUrl(item.url)
+      })) : undefined,
+      mediaGroupId: msg.mediaGroupId || msg.media_group_id
     }));
   }
 

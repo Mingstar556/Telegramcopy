@@ -144,6 +144,7 @@ class ChatMessage(models.Model):
     media_url = models.TextField(blank=True, null=True)
     media_filename = models.CharField(max_length=256, blank=True, null=True)
     media_duration = models.IntegerField(default=0)
+    media_group_id = models.CharField(max_length=64, blank=True, null=True, db_index=True)  # Telegram album / media group
 
     # Sticker attachments
     sticker_id = models.CharField(max_length=64, blank=True, null=True)

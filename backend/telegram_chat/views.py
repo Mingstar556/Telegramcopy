@@ -549,13 +549,34 @@ def messages_history(request):
         target_avatar = request.build_absolute_uri(target_avatar)
 
     data = []
+    album_map = {}
+
     for m in messages:
         m_dict = format_message_dict(m)
         if not m.is_outgoing and target_avatar:
             m_dict['senderAvatar'] = target_avatar
         if m_dict.get('media') and m_dict['media'].get('url') and m_dict['media']['url'].startswith('/'):
             m_dict['media']['url'] = request.build_absolute_uri(m_dict['media']['url'])
-        data.append(m_dict)
+
+        mg_id = getattr(m, 'media_group_id', None)
+        if mg_id and m.media_type == 'photo':
+            if mg_id in album_map:
+                parent = album_map[mg_id]
+                photo_item = {'type': 'photo', 'url': m_dict['media']['url'] if m_dict.get('media') else m.media_url}
+                if photo_item['url'] and photo_item['url'].startswith('/'):
+                    photo_item['url'] = request.build_absolute_uri(photo_item['url'])
+                if 'album' not in parent or not parent['album']:
+                    parent['album'] = [parent['media']] if parent.get('media') else []
+                parent['album'].append(photo_item)
+                if not parent.get('message') and m_dict.get('message'):
+                    parent['message'] = m_dict['message']
+                continue
+            else:
+                album_map[mg_id] = m_dict
+                m_dict['album'] = [m_dict['media']] if m_dict.get('media') else []
+                data.append(m_dict)
+        else:
+            data.append(m_dict)
 
     return Response(data)
 
@@ -583,6 +604,8 @@ def send_message(request):
     sticker = raw_sticker if isinstance(raw_sticker, dict) else None
     raw_media = request.data.get('media')
     media = raw_media if isinstance(raw_media, dict) else None
+    raw_album = request.data.get('album')
+    album = raw_album if isinstance(raw_album, list) else None
     if not media and (action == 'send_photo' or request.data.get('file')):
         file_val = request.data.get('file') or request.data.get('photo')
         if file_val:
@@ -660,7 +683,8 @@ def send_message(request):
             sticker=sticker,
             operator_id=operator_id,
             msg_uid=msg_uid,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            album=album
         )
 
     # 4. Broadcast to operator's WebSocket channel
@@ -677,6 +701,8 @@ def send_message(request):
     }
     if isinstance(media, dict):
         ws_event["media"] = media
+    if isinstance(album, list):
+        ws_event["album"] = album
     if isinstance(sticker, dict):
         ws_event["sticker"] = sticker
     if reply_markup:

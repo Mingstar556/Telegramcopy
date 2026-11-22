@@ -6,7 +6,7 @@ import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -455,7 +455,8 @@ class TelegramBotGateway:
         sticker: Optional[Dict[str, Any]] = None,
         action: Optional[str] = 'send_message',
         operator_id: Optional[str] = None,
-        reply_markup: Optional[Dict[str, Any]] = None
+        reply_markup: Optional[Dict[str, Any]] = None,
+        album: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Dispatch message to Telegram user via Telegram Bot API.
@@ -494,6 +495,23 @@ class TelegramBotGateway:
             text = ""
 
         try:
+            # 0. Multi-Photo Album Dispatch (sendMediaGroup)
+            if album and isinstance(album, list) and len(album) > 1:
+                url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMediaGroup"
+                media_list = []
+                for idx, a_item in enumerate(album):
+                    photo_u = a_item.get('url', '')
+                    m_entry = {
+                        "type": a_item.get('type', 'photo'),
+                        "media": photo_u
+                    }
+                    if idx == 0 and text:
+                        m_entry["caption"] = text
+                    media_list.append(m_entry)
+                import json
+                resp = cls._post(url, data={'chat_id': chat_id, 'media': json.dumps(media_list)}, timeout=20)
+                return resp.json()
+
             # 1. Voice Note Dispatch
             if media_dict and media_dict.get('type') == 'voice':
                 voice_url = media_dict.get('url', '')
@@ -590,7 +608,8 @@ class TelegramBotGateway:
         action: Optional[str] = 'send_message',
         operator_id: Optional[str] = None,
         msg_uid: Optional[str] = None,
-        reply_markup: Optional[Dict[str, Any]] = None
+        reply_markup: Optional[Dict[str, Any]] = None,
+        album: Optional[List[Dict[str, Any]]] = None
     ):
         """
         Dispatches message to Telegram in a high-priority background worker thread without blocking caller.
@@ -606,7 +625,8 @@ class TelegramBotGateway:
                 sticker=sticker,
                 action=action,
                 operator_id=operator_id,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                album=album
             )
 
         def _worker():
@@ -619,7 +639,8 @@ class TelegramBotGateway:
                     sticker=sticker,
                     action=action,
                     operator_id=operator_id,
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    album=album
                 )
             except Exception as exc:
                 logger.error(f"[Async Dispatch Error]: {exc}")
@@ -864,6 +885,7 @@ class TelegramBotGateway:
 
         # Determine unique message_uid to guarantee idempotency
         telegram_msg_id = message_data.get('message_id')
+        media_group_id = str(message_data.get('media_group_id', '') or '').strip() or None
         if telegram_msg_id is not None:
             msg_uid = f"msg_tg_{telegram_id}_{telegram_msg_id}"
         else:
@@ -890,6 +912,7 @@ class TelegramBotGateway:
                 media_url=media_url,
                 media_filename=media_filename,
                 media_duration=media_duration,
+                media_group_id=media_group_id,
                 sticker_id=sticker_id,
                 sticker_pack=sticker_pack,
                 sticker_emoji=sticker_emoji,
@@ -915,6 +938,16 @@ class TelegramBotGateway:
             "is_outgoing": False,
             "status": "delivered",
         }
+        if media_group_id:
+            ws_payload["media_group_id"] = media_group_id
+            ws_payload["mediaGroupId"] = media_group_id
+            if media_type == 'photo':
+                group_photos = list(ChatMessage.objects.filter(
+                    media_group_id=media_group_id,
+                    media_type='photo'
+                ).order_by('created_at').values_list('media_url', flat=True))
+                if len(group_photos) > 1:
+                    ws_payload["album"] = [{"type": "photo", "url": u} for u in group_photos if u]
         if media_type:
             ws_payload["media"] = {"type": media_type, "url": media_url}
         if sticker_id:

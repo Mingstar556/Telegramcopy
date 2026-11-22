@@ -84,6 +84,7 @@ class WebSocketService {
             : (data["User-ID"] === userId && data.action === 'sent');
 
           const rawMedia = data.media;
+          const rawAlbum = data.album;
           const incomingMessage: ChatMessage = {
             id: data.id || 'ws_' + Date.now(),
             senderId: isOutgoing ? userId : (data["sender_id"] || data["from_user"] || data["to-user"]),
@@ -99,7 +100,12 @@ class WebSocketService {
             media: rawMedia ? {
               ...rawMedia,
               url: resolveMediaUrl(rawMedia.url)
-            } : undefined
+            } : undefined,
+            mediaGroupId: data.media_group_id || data.mediaGroupId,
+            album: Array.isArray(rawAlbum) ? rawAlbum.map((item: any) => ({
+              ...item,
+              url: resolveMediaUrl(item.url)
+            })) : undefined
           };
           this.notifyMessage(incomingMessage);
         } catch (err) {

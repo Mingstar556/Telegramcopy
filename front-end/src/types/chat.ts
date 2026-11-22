@@ -61,6 +61,7 @@ export interface ChatMessage {
   };
   media?: MediaItem;
   album?: MediaItem[]; // For multiple images / media gallery
+  mediaGroupId?: string;
   forwardedFrom?: string;
   replyTo?: {
     id: string;
@@ -99,6 +100,7 @@ export interface OutgoingBackendPayload {
   };
   "media"?: MediaItem;
   "album"?: MediaItem[];
+  "media_group_id"?: string;
   "forwarded_from"?: string;
   "reaction"?: {
     message_id: string;

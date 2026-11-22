@@ -553,6 +553,26 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
           {renderInlineKeyboard()}
           {renderReactionBadges()}
         </div>
+
+        {/* Lightbox Modal for Photo Group */}
+        {expandedMediaUrl && (
+          <div
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+            onClick={() => setExpandedMediaUrl(null)}
+          >
+            <button
+              onClick={() => setExpandedMediaUrl(null)}
+              className="absolute top-5 right-5 text-white/80 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition btn-press"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={expandedMediaUrl}
+              alt="Full view"
+              className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -727,6 +747,26 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
           {renderInlineKeyboard()}
           {renderReactionBadges()}
         </div>
+
+        {/* Lightbox Modal for Photo Group */}
+        {expandedMediaUrl && (
+          <div
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+            onClick={() => setExpandedMediaUrl(null)}
+          >
+            <button
+              onClick={() => setExpandedMediaUrl(null)}
+              className="absolute top-5 right-5 text-white/80 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition btn-press"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={expandedMediaUrl}
+              alt="Full view"
+              className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -791,6 +831,26 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
           {renderInlineKeyboard()}
           {renderReactionBadges()}
         </div>
+
+        {/* Lightbox Modal for Photo Group */}
+        {expandedMediaUrl && (
+          <div
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
+            onClick={() => setExpandedMediaUrl(null)}
+          >
+            <button
+              onClick={() => setExpandedMediaUrl(null)}
+              className="absolute top-5 right-5 text-white/80 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition btn-press"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={expandedMediaUrl}
+              alt="Full view"
+              className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
+            />
+          </div>
+        )}
       </div>
     );
   }

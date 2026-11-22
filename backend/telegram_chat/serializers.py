@@ -30,6 +30,10 @@ def format_message_dict(msg: ChatMessage) -> dict:
             'duration': msg.media_duration or 0,
         }
 
+    if getattr(msg, 'media_group_id', None):
+        data['mediaGroupId'] = msg.media_group_id
+        data['media_group_id'] = msg.media_group_id
+
     if msg.sticker_id:
         data['sticker'] = {
             'id': msg.sticker_id,
