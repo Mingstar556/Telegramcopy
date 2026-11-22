@@ -3,18 +3,15 @@ import {
   Palette,
   Type,
   Sparkles,
-  Zap,
-  Activity,
-  Wind,
+  EyeOff,
   Minus,
   Plus,
   Sliders,
-  Check,
-  EyeOff
+  Check
 } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import { ThemeMode, FontFamily, AnimationStyle } from '../../types/theme';
+import { ThemeMode, FontFamily, AccentColor } from '../../types/theme';
 
 interface QuickAppearancePopoverProps {
   onOpenFullSettings?: () => void;
@@ -56,27 +53,34 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
     { key: 'cloud-light', name: 'Light', color: '#f8fafc', accent: '#2563eb', secondary: '#7c3aed' }
   ];
 
-  const FONTS: { key: FontFamily; label: string }[] = [
-    { key: 'sans', label: 'Default' },
-    { key: 'inter', label: 'Inter' },
-    { key: 'jakarta', label: 'Jakarta' },
-    { key: 'outfit', label: 'Outfit' },
-    { key: 'roboto', label: 'Roboto' },
-    { key: 'rounded', label: 'Nunito' },
-    { key: 'mono', label: 'Mono' }
+  const QUICK_ACCENTS: { key: AccentColor; label: string; color: string }[] = [
+    { key: 'default', label: 'Theme Default', color: 'transparent' },
+    { key: 'cyan', label: 'Cyan', color: '#2aabee' },
+    { key: 'gold', label: 'Gold', color: '#e5b842' },
+    { key: 'emerald', label: 'Emerald', color: '#10b981' },
+    { key: 'purple', label: 'Purple', color: '#a855f7' },
+    { key: 'amber', label: 'Amber', color: '#f59e0b' },
+    { key: 'rose', label: 'Rose', color: '#f43f5e' },
+    { key: 'indigo', label: 'Indigo', color: '#6366f1' },
+    { key: 'lime', label: 'Lime', color: '#84cc16' }
   ];
 
-  const ANIMATIONS: { key: AnimationStyle; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { key: 'snappy', label: 'Snappy', icon: Zap },
-    { key: 'bouncy', label: 'Bouncy', icon: Sparkles },
-    { key: 'smooth', label: 'Smooth', icon: Wind },
-    { key: 'reduced', label: 'Reduced', icon: EyeOff }
+  const FONTS: { key: FontFamily; label: string; preview: string }[] = [
+    { key: 'sans', label: 'System', preview: 'Apple / SF' },
+    { key: 'inter', label: 'Inter', preview: 'Modern' },
+    { key: 'jakarta', label: 'Jakarta', preview: 'Geometric' },
+    { key: 'outfit', label: 'Outfit', preview: 'Clean' },
+    { key: 'roboto', label: 'Roboto', preview: 'Android' },
+    { key: 'rounded', label: 'Nunito', preview: 'Soft' },
+    { key: 'mono', label: 'Mono', preview: 'Code' }
   ];
 
   const handleAdjustFontSize = (delta: number) => {
     const next = Math.min(22, Math.max(13, settings.fontSize + delta));
     updateSettings({ fontSize: next });
   };
+
+  const isNoAnimation = settings.animationStyle === 'none' || settings.animationsEnabled === false;
 
   return (
     <div className={`relative ${className}`} ref={popoverRef}>
@@ -99,7 +103,7 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
       {isOpen && (
         <div
           style={{ transformOrigin: 'top right' }}
-          className="absolute right-0 top-11 w-72 sm:w-80 rounded-2xl p-4 shadow-2xl border z-50 backdrop-blur-2xl animate-pop-in bg-[var(--color-modal-bg)] border-[var(--color-border)] text-[var(--color-text-main)] shadow-[0_16px_40px_rgba(0,0,0,0.65)] select-none"
+          className="absolute right-0 top-11 w-80 sm:w-88 rounded-2xl p-4 shadow-2xl border z-50 backdrop-blur-2xl animate-pop-in bg-[var(--color-modal-bg)] border-[var(--color-border)] text-[var(--color-text-main)] shadow-[0_16px_40px_rgba(0,0,0,0.7)] select-none"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-3">
@@ -107,16 +111,16 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
               <Sparkles className="w-4 h-4 text-[var(--color-accent)]" />
               <span>Quick Appearance Customizer</span>
             </div>
-            <span className="text-[10px] text-[var(--color-accent)] font-mono font-bold uppercase">
-              PC Mode
+            <span className="text-[10px] text-[var(--color-accent)] font-mono font-bold uppercase tracking-wider">
+              Instant
             </span>
           </div>
 
           <div className="space-y-3.5 text-xs">
-            {/* 1. Theme Swatches */}
+            {/* 1. Theme Presets */}
             <div>
               <div className="text-[11px] font-semibold text-[var(--color-text-muted)] mb-1.5 flex items-center justify-between">
-                <span>Theme Preset</span>
+                <span>Theme Preset (8 Profiles)</span>
                 <span className="capitalize font-mono text-[10px] text-[var(--color-accent)] font-bold">
                   {theme.replace('-', ' ')}
                 </span>
@@ -155,8 +159,8 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
                         />
                         <span
                           style={{ backgroundColor: th.secondary }}
-                          className="w-2.5 h-2.5 rounded-full border border-white/25 shadow-sm ring-1 ring-white/10"
-                          title={`Secondary Glow: ${th.secondary}`}
+                          className="w-2.5 h-2.5 rounded-full border border-white/25 shadow-sm"
+                          title="Secondary Accent"
                         />
                       </div>
                       <span className="text-[10px] font-medium leading-none truncate max-w-full">
@@ -168,10 +172,48 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
               </div>
             </div>
 
-            {/* 2. Font Family Chips */}
+            {/* Accent Color Quick Dots */}
+            <div>
+              <div className="text-[11px] font-semibold text-[var(--color-text-muted)] mb-1 flex items-center justify-between">
+                <span>Accent Color</span>
+                <span className="capitalize font-mono text-[10px] text-[var(--color-accent)] font-bold">
+                  {settings.accentColor}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-1 p-1.5 rounded-xl bg-black/30 border border-white/5">
+                {QUICK_ACCENTS.map((acc) => {
+                  const isSelected = settings.accentColor === acc.key;
+                  return (
+                    <button
+                      key={acc.key}
+                      onClick={() => updateSettings({ accentColor: acc.key })}
+                      title={acc.label}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center transition-all btn-press ${
+                        isSelected
+                          ? 'ring-2 ring-[var(--color-accent)] scale-110 shadow-md'
+                          : 'opacity-70 hover:opacity-100 hover:scale-105'
+                      }`}
+                    >
+                      {acc.color !== 'transparent' ? (
+                        <span
+                          style={{ backgroundColor: acc.color }}
+                          className="w-4 h-4 rounded-full border border-white/30"
+                        />
+                      ) : (
+                        <span className="w-4 h-4 rounded-full border border-dashed border-white/40 flex items-center justify-center text-[9px] text-white/70">
+                          auto
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. Font Family Selection */}
             <div>
               <div className="text-[11px] font-semibold text-[var(--color-text-muted)] mb-1.5 flex items-center justify-between">
-                <span>Font Family</span>
+                <span>Font Family (7 Styles)</span>
                 <span className="capitalize font-mono text-[10px] text-[var(--color-accent)] font-bold">
                   {settings.fontFamily}
                 </span>
@@ -227,42 +269,60 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
               </div>
             </div>
 
-            {/* 4. Animation Feel & Speed */}
+            {/* 4. Animation Choices (ONLY 2: Normal vs Non-animation) */}
             <div>
               <div className="text-[11px] font-semibold text-[var(--color-text-muted)] mb-1.5 flex items-center justify-between">
-                <span>Animation Feel</span>
+                <span>Animations</span>
                 <span className="capitalize font-mono text-[10px] text-[var(--color-accent)] font-bold">
-                  {settings.animationStyle || 'snappy'}
+                  {isNoAnimation ? 'Non-animation' : 'Normal'}
                 </span>
               </div>
-              <div className="grid grid-cols-4 gap-1">
-                {ANIMATIONS.map((anim) => {
-                  const Icon = anim.icon;
-                  const isSelected = (settings.animationStyle || 'snappy') === anim.key;
-                  return (
-                    <button
-                      key={anim.key}
-                      onClick={() => {
-                        updateSettings({ animationStyle: anim.key });
-                        notify({
-                          title: 'Animation Updated',
-                          message: `Motion tuned to ${anim.label}`,
-                          type: 'info',
-                          duration: 1600
-                        });
-                      }}
-                      className={`p-1.5 rounded-xl border flex flex-col items-center gap-1 transition-all btn-press ${
-                        isSelected
-                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/20 text-[var(--color-accent)] font-bold ring-1 ring-[var(--color-accent)]'
-                          : 'border-white/10 hover:bg-white/5 text-[var(--color-text-muted)]'
-                      }`}
-                      title={anim.label}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span className="text-[10px]">{anim.label}</span>
-                    </button>
-                  );
-                })}
+              <div className="grid grid-cols-2 gap-1.5">
+                {/* 1. Normal Animation */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSettings({ animationStyle: 'normal', animationsEnabled: true });
+                    notify({
+                      title: 'Animations Enabled',
+                      message: 'Normal smooth animations active',
+                      type: 'info',
+                      duration: 1600
+                    });
+                  }}
+                  className={`p-2 rounded-xl border flex items-center justify-center gap-1.5 transition-all btn-press ${
+                    !isNoAnimation
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/20 text-[var(--color-accent)] font-bold ring-1 ring-[var(--color-accent)]'
+                      : 'border-white/10 hover:bg-white/5 text-[var(--color-text-muted)]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">Normal</span>
+                  {!isNoAnimation && <Check className="w-3 h-3 ml-0.5" />}
+                </button>
+
+                {/* 2. Non-animation (No Animation) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateSettings({ animationStyle: 'none', animationsEnabled: false });
+                    notify({
+                      title: 'Animations Disabled',
+                      message: 'Non-animation mode active (instant transitions)',
+                      type: 'info',
+                      duration: 1600
+                    });
+                  }}
+                  className={`p-2 rounded-xl border flex items-center justify-center gap-1.5 transition-all btn-press ${
+                    isNoAnimation
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/20 text-[var(--color-accent)] font-bold ring-1 ring-[var(--color-accent)]'
+                      : 'border-white/10 hover:bg-white/5 text-[var(--color-text-muted)]'
+                  }`}
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span className="text-[11px]">Non-animation</span>
+                  {isNoAnimation && <Check className="w-3 h-3 ml-0.5" />}
+                </button>
               </div>
             </div>
           </div>
@@ -271,7 +331,7 @@ export const QuickAppearancePopover: React.FC<QuickAppearancePopoverProps> = ({
           {onOpenFullSettings && (
             <div className="mt-3.5 pt-2.5 border-t border-white/5 flex items-center justify-between">
               <span className="text-[10px] text-[var(--color-text-muted)]">
-                More wallpapers & sounds
+                More wallpapers & typography
               </span>
               <button
                 type="button"

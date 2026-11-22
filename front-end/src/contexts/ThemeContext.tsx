@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import {
   ChatSettings,
-  FontFamily,
   ThemeContextValue,
   ThemeMode,
   AccentColor
@@ -10,14 +9,17 @@ import {
 const DEFAULT_SETTINGS: ChatSettings = {
   fontSize: 15,
   fontFamily: 'sans',
+  fontWeight: 'normal',
+  fontSpacing: 'normal',
   accentColor: 'default',
   bubbleStyle: 'modern',
   enterToSend: true,
   soundEnabled: true,
   backgroundPattern: 'doodles',
+  backgroundOpacity: 60,
   compactMode: false,
   animationsEnabled: true,
-  animationStyle: 'snappy'
+  animationStyle: 'normal'
 };
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
@@ -51,7 +53,23 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [settings, setSettingsState] = useState<ChatSettings>(() => {
     try {
       const saved = localStorage.getItem('tg_chat_settings');
-      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Normalize legacy animation styles to 2 choices: 'normal' or 'none'
+        if (parsed.animationStyle !== 'normal' && parsed.animationStyle !== 'none') {
+          parsed.animationStyle =
+            parsed.animationStyle === 'reduced' || parsed.animationsEnabled === false
+              ? 'none'
+              : 'normal';
+        }
+        if (parsed.animationsEnabled === false) {
+          parsed.animationStyle = 'none';
+        } else if (parsed.animationStyle === 'normal') {
+          parsed.animationsEnabled = true;
+        }
+        return { ...DEFAULT_SETTINGS, ...parsed };
+      }
+      return DEFAULT_SETTINGS;
     } catch {
       return DEFAULT_SETTINGS;
     }
@@ -166,6 +184,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateSettings = (newSettings: Partial<ChatSettings>) => {
     setSettingsState(prev => {
       const updated = { ...prev, ...newSettings };
+
+      // Ensure animationStyle and animationsEnabled are strictly aligned
+      if (newSettings.animationStyle !== undefined) {
+        updated.animationsEnabled = newSettings.animationStyle === 'normal';
+      } else if (newSettings.animationsEnabled !== undefined) {
+        updated.animationStyle = newSettings.animationsEnabled ? 'normal' : 'none';
+      }
+
       localStorage.setItem('tg_chat_settings', JSON.stringify(updated));
       return updated;
     });
@@ -186,6 +212,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       'theme-midnight-purple',
       'theme-sunset-amber',
       'theme-rose-quartz',
+      'oled-pure',
       'theme-oled-pure',
       'theme-cloud-light'
     ];
@@ -199,7 +226,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [theme]);
 
-  // Sync font size and font family to CSS variables
+  // Sync font size, family, weight, and line height to CSS variables
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--tg-chat-font-size', `${settings.fontSize}px`);
@@ -219,7 +246,27 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fontVal = '"JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace';
     }
     root.style.setProperty('--tg-chat-font-family', fontVal);
-  }, [settings.fontSize, settings.fontFamily]);
+
+    // Font weight
+    const weightVal =
+      settings.fontWeight === 'bold'
+        ? '700'
+        : settings.fontWeight === 'semibold'
+        ? '600'
+        : settings.fontWeight === 'medium'
+        ? '500'
+        : '400';
+    root.style.setProperty('--tg-chat-font-weight', weightVal);
+
+    // Font line-height (spacing)
+    const lineHeightVal =
+      settings.fontSpacing === 'compact'
+        ? '1.3'
+        : settings.fontSpacing === 'relaxed'
+        ? '1.65'
+        : '1.45';
+    root.style.setProperty('--tg-chat-line-height', lineHeightVal);
+  }, [settings.fontSize, settings.fontFamily, settings.fontWeight, settings.fontSpacing]);
 
   // Sync custom accent color if user overrides default
   useEffect(() => {
@@ -293,6 +340,22 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           secondary: '#f59e0b',
           secondaryHover: '#fbbf24',
           secondaryGlow: 'rgba(245, 158, 11, 0.45)'
+        },
+        indigo: {
+          base: '#6366f1',
+          hover: '#818cf8',
+          glow: 'rgba(99, 102, 241, 0.35)',
+          secondary: '#38bdf8',
+          secondaryHover: '#7dd3fc',
+          secondaryGlow: 'rgba(56, 189, 248, 0.45)'
+        },
+        lime: {
+          base: '#84cc16',
+          hover: '#a3e635',
+          glow: 'rgba(132, 204, 22, 0.35)',
+          secondary: '#10b981',
+          secondaryHover: '#34d399',
+          secondaryGlow: 'rgba(16, 185, 129, 0.45)'
         }
       };
 
@@ -313,10 +376,24 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     document.documentElement.setAttribute('data-bubble-style', settings.bubbleStyle || 'modern');
   }, [settings.bubbleStyle]);
 
-  // Sync animation style attribute
+  // Sync animation choice: Normal vs Non-animation (none)
   useEffect(() => {
-    document.documentElement.setAttribute('data-animation-style', settings.animationStyle || 'snappy');
-  }, [settings.animationStyle]);
+    const isNone = settings.animationStyle === 'none' || settings.animationsEnabled === false;
+    const choice = isNone ? 'none' : 'normal';
+    document.documentElement.setAttribute('data-animation-style', choice);
+    document.documentElement.setAttribute('data-animations', isNone ? 'false' : 'true');
+    if (isNone) {
+      document.documentElement.classList.add('no-animation');
+    } else {
+      document.documentElement.classList.remove('no-animation');
+    }
+  }, [settings.animationStyle, settings.animationsEnabled]);
+
+  // Sync wallpaper pattern opacity
+  useEffect(() => {
+    const opacity = (settings.backgroundOpacity ?? 60) / 100;
+    document.documentElement.style.setProperty('--tg-wallpaper-opacity', `${opacity}`);
+  }, [settings.backgroundOpacity]);
 
   return (
     <ThemeContext.Provider

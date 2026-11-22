@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { UserCircle, Sparkles, Settings as SettingsIcon, LogOut, Check, Bookmark, Users, UserPlus, Bot, SquareMousePointer } from 'lucide-react';
+import { UserCircle, Sparkles, Settings as SettingsIcon, LogOut, Check, Bookmark, Users, UserPlus, SquareMousePointer } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useChat } from '../../contexts/ChatContext';
@@ -9,15 +9,13 @@ interface ThreeDotsMenuProps {
   onClose: () => void;
   onOpenAccount: () => void;
   onOpenSettings: () => void;
-  onOpenGenerator?: () => void;
 }
 
 export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
   isOpen,
   onClose,
   onOpenAccount,
-  onOpenSettings,
-  onOpenGenerator
+  onOpenSettings
 }) => {
   const { logout, account } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -118,24 +116,6 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
         </span>
       </button>
 
-      {/* Bot Account Generator (Admin Tool) */}
-      {onOpenGenerator && (
-        <button
-          onClick={() => {
-            onClose();
-            onOpenGenerator();
-          }}
-          className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl hover:bg-white/[0.06] transition-colors btn-press text-left"
-        >
-          <div className="flex items-center gap-3">
-            <Bot className="w-4 h-4 text-emerald-400" />
-            <span>Bot Generator</span>
-          </div>
-          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-mono font-bold uppercase">
-            Admin
-          </span>
-        </button>
-      )}
 
       <div className="my-1 border-t border-white/5" />
 

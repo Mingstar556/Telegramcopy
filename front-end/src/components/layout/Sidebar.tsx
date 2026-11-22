@@ -21,13 +21,11 @@ import { SwipeableChatItem } from './SwipeableChatItem';
 interface SidebarProps {
   onOpenAccount: () => void;
   onOpenSettings: () => void;
-  onOpenGenerator?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAccount,
-  onOpenSettings,
-  onOpenGenerator
+  onOpenSettings
 }) => {
   const { account } = useAuth();
   const {
@@ -117,7 +115,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClose={() => setIsMenuOpen(false)}
               onOpenAccount={onOpenAccount}
               onOpenSettings={onOpenSettings}
-              onOpenGenerator={onOpenGenerator}
             />
           </div>
         </div>

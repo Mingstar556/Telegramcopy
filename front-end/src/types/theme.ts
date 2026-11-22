@@ -17,6 +17,10 @@ export type FontFamily =
   | 'mono'      // JetBrains Mono
   | 'rounded';  // Nunito Friendly Rounded
 
+export type FontWeight = 'normal' | 'medium' | 'semibold' | 'bold';
+
+export type FontSpacing = 'compact' | 'normal' | 'relaxed';
+
 export type AccentColor =
   | 'default'
   | 'cyan'
@@ -25,22 +29,28 @@ export type AccentColor =
   | 'purple'
   | 'amber'
   | 'rose'
-  | 'crimson';
+  | 'crimson'
+  | 'indigo'
+  | 'lime';
 
 export type BubbleStyle = 'modern' | 'classic' | 'sharp' | 'pill';
 
 export type BackgroundPattern = 'none' | 'doodles' | 'stars' | 'geometric' | 'mesh';
 
-export type AnimationStyle = 'snappy' | 'bouncy' | 'smooth' | 'reduced';
+// Only 2 animation choices: 'normal' (smooth motion) and 'none' (non-animation / instant)
+export type AnimationStyle = 'normal' | 'none';
 
 export interface ChatSettings {
   fontSize: number; // e.g. 13 - 22 px
   fontFamily: FontFamily;
+  fontWeight?: FontWeight;
+  fontSpacing?: FontSpacing;
   accentColor: AccentColor;
   bubbleStyle: BubbleStyle;
   enterToSend: boolean;
   soundEnabled: boolean;
   backgroundPattern: BackgroundPattern;
+  backgroundOpacity?: number; // 10% - 100%
   compactMode: boolean;
   animationsEnabled: boolean;
   animationStyle: AnimationStyle;

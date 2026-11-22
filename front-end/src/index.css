@@ -305,11 +305,16 @@ html, body {
   overscroll-behavior-y: none;
   background-color: var(--color-bg-base);
   color: var(--color-text-main);
-  font-family: var(--tg-chat-font-family);
+  font-family: var(--tg-chat-font-family) !important;
+  font-weight: var(--tg-chat-font-weight, 400);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+
+button, input, optgroup, select, textarea {
+  font-family: inherit;
 }
 
 /* Strip any native mobile WebKit / Android box styling from textarea and inputs */
@@ -502,30 +507,39 @@ input:focus {
   }
 }
 
-/* Animation speed & feel profiles (Snappy, Bouncy, Smooth, Reduced) */
+/* Animation Choices: Normal vs Non-animation (None) */
 :root {
   --anim-msg-duration: 200ms;
 }
 
-[data-animation-style="snappy"] {
-  --anim-msg-duration: 150ms;
+[data-animation-style="normal"] {
+  --anim-msg-duration: 180ms;
   --ease-bouncy: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-[data-animation-style="bouncy"] {
-  --anim-msg-duration: 280ms;
-  --ease-bouncy: cubic-bezier(0.34, 1.65, 0.64, 1);
-}
-
-[data-animation-style="smooth"] {
-  --anim-msg-duration: 320ms;
-  --ease-bouncy: cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-[data-animation-style="reduced"] * {
-  animation-duration: 0.001ms !important;
+[data-animation-style="none"] *,
+[data-animations="false"] *,
+.no-animation,
+.no-animation * {
+  animation: none !important;
+  animation-duration: 0.0001ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
+  transition: none !important;
+  transition-duration: 0.0001ms !important;
+  scroll-behavior: auto !important;
+}
+
+[data-animation-style="none"] .btn-press,
+[data-animations="false"] .btn-press,
+.no-animation .btn-press {
+  transform: none !important;
+  transition: none !important;
+}
+
+[data-animation-style="none"] .btn-press:active,
+[data-animations="false"] .btn-press:active,
+.no-animation .btn-press:active {
+  transform: none !important;
 }
 
 .animate-msg-in {

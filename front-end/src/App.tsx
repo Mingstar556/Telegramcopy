@@ -8,7 +8,6 @@ import { BottomNavBar, MobileTab } from './components/layout/BottomNavBar';
 import { AccountModal } from './components/modals/AccountModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { UserProfileModal } from './components/modals/UserProfileModal';
-import { BotAccountGeneratorModal } from './components/modals/BotAccountGeneratorModal';
 import { CreateInlineButtonModal } from './components/chat/CreateInlineButtonModal';
 import { NoSignalScreen } from './components/common/NoSignalScreen';
 import { NotificationToastContainer } from './components/common/NotificationToast';
@@ -30,7 +29,6 @@ export const AppContent: React.FC = () => {
   const [mobileTab, setMobileTab] = useState<MobileTab>('chats');
   const [isAccountOpen, setIsAccountOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
 
   // Connection & Signal status: 'checking' | 'connected' | 'no_signal'
   const [signalStatus, setSignalStatus] = useState<'checking' | 'connected' | 'no_signal'>('checking');
@@ -127,7 +125,6 @@ export const AppContent: React.FC = () => {
           <Sidebar
             onOpenAccount={() => setIsAccountOpen(true)}
             onOpenSettings={() => setIsSettingsOpen(true)}
-            onOpenGenerator={() => setIsGeneratorOpen(true)}
           />
         </div>
 
@@ -172,11 +169,6 @@ export const AppContent: React.FC = () => {
         onClose={closeUserProfile}
       />
 
-      {/* Bot Account Generator Modal (Admin Tool) */}
-      <BotAccountGeneratorModal
-        isOpen={isGeneratorOpen}
-        onClose={() => setIsGeneratorOpen(false)}
-      />
 
       {/* Create Inline Button Modal */}
       <CreateInlineButtonModal
