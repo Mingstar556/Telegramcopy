@@ -264,6 +264,45 @@ class TelegramBotGateway:
             pass
 
     @classmethod
+    def set_bot_profile_photo(cls, bot_token: str, photo_bytes: bytes, filename: str = 'avatar.jpg') -> Dict[str, Any]:
+        """
+        Updates bot profile picture on Telegram via official setMyProfilePhoto API.
+        """
+        if not bot_token:
+            return {"ok": False, "error": "Bot token not configured"}
+        if cls._is_test_environment() and not cls._is_callable_mocked(requests.post):
+            return {"ok": True, "result": True, "simulated": True}
+        try:
+            import json
+            url = f"{TELEGRAM_API_BASE}/bot{bot_token}/setMyProfilePhoto"
+            photo_meta = json.dumps({"type": "static", "photo": "attach://avatar"})
+            data = {"photo": photo_meta}
+            mime = "image/png" if filename.lower().endswith('.png') else "image/jpeg"
+            files = {"avatar": (filename, photo_bytes, mime)}
+            resp = cls._post(url, data=data, files=files, timeout=20)
+            return resp.json()
+        except Exception as e:
+            logger.error(f"[Telegram Gateway] Failed to set bot profile photo: {e}")
+            return {"ok": False, "error": str(e)}
+
+    @classmethod
+    def remove_bot_profile_photo(cls, bot_token: str) -> Dict[str, Any]:
+        """
+        Removes bot profile picture from Telegram via removeMyProfilePhoto API.
+        """
+        if not bot_token:
+            return {"ok": False, "error": "Bot token not configured"}
+        if cls._is_test_environment() and not cls._is_callable_mocked(requests.post):
+            return {"ok": True, "result": True, "simulated": True}
+        try:
+            url = f"{TELEGRAM_API_BASE}/bot{bot_token}/removeMyProfilePhoto"
+            resp = cls._post(url, json={}, timeout=10)
+            return resp.json()
+        except Exception as e:
+            logger.error(f"[Telegram Gateway] Failed to remove bot profile photo: {e}")
+            return {"ok": False, "error": str(e)}
+
+    @classmethod
     def sync_bot_conversations(cls, user_id: Optional[str] = None, operator_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Auto-fetch conversations and updates from Telegram Bot API getUpdates.
@@ -660,9 +699,67 @@ class TelegramBotGateway:
                 return resp.json()
 
             # 3. Sticker Dispatch
-            if sticker_dict and sticker_dict.get('id'):
+            if sticker_dict or action == 'send_sticker':
+                sticker_target = (
+                    (sticker_dict.get('file_id') or sticker_dict.get('id') or '')
+                    if sticker_dict else ''
+                )
+                file_data = (
+                    (sticker_dict.get('url') if sticker_dict else None)
+                    or (media_dict.get('url') if media_dict else None)
+                    or ''
+                )
+
+                # Base64 sticker (e.g. from canvas or custom sticker)
+                if isinstance(file_data, str) and file_data.startswith('data:'):
+                    try:
+                        import base64
+                        import json
+                        header, b64data = file_data.split(';base64,', 1)
+                        mime_type = header.split(':', 1)[1] if ':' in header else 'image/webp'
+                        raw_bytes = base64.b64decode(b64data)
+                        ext = 'webp' if 'webp' in mime_type else 'png'
+
+                        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendSticker"
+                        files = {'sticker': (f'sticker.{ext}', raw_bytes, mime_type)}
+                        data = {'chat_id': chat_id}
+                        if sticker_dict and sticker_dict.get('emoji'):
+                            data['emoji'] = sticker_dict.get('emoji')
+                        if reply_markup:
+                            data['reply_markup'] = json.dumps(reply_markup) if isinstance(reply_markup, dict) else reply_markup
+                        resp = cls._post(url, data=data, files=files, timeout=15)
+                        if resp.status_code == 200:
+                            return resp.json()
+
+                        # Fallback to sendPhoto if sendSticker rejected format
+                        url_photo = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendPhoto"
+                        files_photo = {'photo': (f'sticker.{ext}', raw_bytes, mime_type)}
+                        data_photo = {'chat_id': chat_id}
+                        if reply_markup:
+                            data_photo['reply_markup'] = json.dumps(reply_markup) if isinstance(reply_markup, dict) else reply_markup
+                        resp_photo = cls._post(url_photo, data=data_photo, files=files_photo, timeout=15)
+                        if resp_photo.status_code == 200:
+                            return resp_photo.json()
+                    except Exception as ex:
+                        logger.warning(f"[Telegram Gateway] Failed to send base64 sticker: {ex}")
+
+                # Real Telegram file_id (typically > 20 chars alphanumeric) or public HTTP(S) URL
+                if sticker_target and (len(sticker_target) >= 20 or sticker_target.startswith('http')):
+                    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendSticker"
+                    payload = {'chat_id': chat_id, 'sticker': sticker_target}
+                    if sticker_dict and sticker_dict.get('emoji'):
+                        payload['emoji'] = sticker_dict.get('emoji')
+                    if reply_markup:
+                        payload['reply_markup'] = reply_markup
+                    resp = cls._post(url, json=payload, timeout=10)
+                    if resp.status_code == 200:
+                        return resp.json()
+
+                # Fallback to text message
                 url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage"
-                text_to_send = f"{sticker_dict.get('emoji', '⭐')} [{sticker_dict.get('id')}]"
+                emoji = (sticker_dict.get('emoji') if sticker_dict else '') or '⭐'
+                name = (sticker_dict.get('name') or sticker_dict.get('id') if sticker_dict else '')
+                text_to_send = f"{emoji} [{name}]" if name else emoji
                 payload = {'chat_id': chat_id, 'text': text_to_send}
                 if reply_markup:
                     payload['reply_markup'] = reply_markup
@@ -744,21 +841,45 @@ class TelegramBotGateway:
                 "data": message_payload
             }
 
+            # Collect all operator target rooms that need this real-time notification
+            target_rooms = {f"operator_{operator_id}"}
+            try:
+                from .models import BotAccount, EmployeeAccount
+                
+                # If operator_id is an EmployeeAccount, find any linked bots
+                emp = EmployeeAccount.objects.filter(user_id=str(operator_id)).first()
+                if emp:
+                    for b in emp.bot_accounts.all():
+                        target_rooms.add(f"operator_{b.user_id}")
+                
+                # If operator_id is a BotAccount, find linked employee and sibling bots sharing the same token
+                bot = BotAccount.objects.filter(user_id=str(operator_id)).select_related('employee').first()
+                if bot:
+                    if bot.employee:
+                        target_rooms.add(f"operator_{bot.employee.user_id}")
+                    if bot.bot_token:
+                        siblings = BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True)
+                        for s_uid in siblings:
+                            target_rooms.add(f"operator_{s_uid}")
+            except Exception:
+                pass
+
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 loop = None
 
-            if loop and loop.is_running():
-                asyncio.ensure_future(
-                    channel_layer.group_send(f"operator_{operator_id}", event),
-                    loop=loop
-                )
-            else:
-                async_to_sync(channel_layer.group_send)(
-                    f"operator_{operator_id}",
-                    event
-                )
+            for room in target_rooms:
+                if loop and loop.is_running():
+                    asyncio.ensure_future(
+                        channel_layer.group_send(room, event),
+                        loop=loop
+                    )
+                else:
+                    async_to_sync(channel_layer.group_send)(
+                        room,
+                        event
+                    )
         except Exception as e:
             logger.error(f"[WebSocket Gateway] Failed to broadcast event: {e}")
 
@@ -922,8 +1043,23 @@ class TelegramBotGateway:
                 video_info = {}
             file_id = str(video_info.get('file_id', '') or '')
             media_duration = video_info.get('duration', 0) or 0
-            if not media_url and file_id and bot_token:
-                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}"
+            media_filename = video_info.get('file_name', 'video.mp4') or 'video.mp4'
+            if bot_token and file_id:
+                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
+                    try:
+                        f_res = requests.get(
+                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                            params={'file_id': file_id},
+                            timeout=5
+                        ).json()
+                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                            file_path = f_res['result'].get('file_path')
+                            if file_path:
+                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                    except Exception as e:
+                        logger.warning(f"Error fetching video file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
                 text_content = message_data.get('caption', '') or ''
         elif 'audio' in message_data and message_data.get('audio'):
@@ -933,9 +1069,23 @@ class TelegramBotGateway:
                 audio_info = {}
             file_id = str(audio_info.get('file_id', '') or '')
             media_duration = audio_info.get('duration', 0) or 0
-            media_filename = audio_info.get('file_name')
-            if not media_url and file_id and bot_token:
-                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}"
+            media_filename = audio_info.get('file_name', 'audio.mp3') or 'audio.mp3'
+            if bot_token and file_id:
+                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
+                    try:
+                        f_res = requests.get(
+                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                            params={'file_id': file_id},
+                            timeout=5
+                        ).json()
+                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                            file_path = f_res['result'].get('file_path')
+                            if file_path:
+                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                    except Exception as e:
+                        logger.warning(f"Error fetching audio file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
                 text_content = message_data.get('caption', '') or ''
         elif 'document' in message_data and message_data.get('document'):
@@ -944,9 +1094,23 @@ class TelegramBotGateway:
             if not isinstance(doc_info, dict):
                 doc_info = {}
             file_id = str(doc_info.get('file_id', '') or '')
-            media_filename = doc_info.get('file_name')
-            if not media_url and file_id and bot_token:
-                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}"
+            media_filename = doc_info.get('file_name', 'document') or 'document'
+            if bot_token and file_id:
+                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
+                    try:
+                        f_res = requests.get(
+                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                            params={'file_id': file_id},
+                            timeout=5
+                        ).json()
+                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                            file_path = f_res['result'].get('file_path')
+                            if file_path:
+                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                    except Exception as e:
+                        logger.warning(f"Error fetching document file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
                 text_content = message_data.get('caption', '') or ''
         elif 'sticker' in message_data and message_data.get('sticker'):
@@ -956,6 +1120,23 @@ class TelegramBotGateway:
             sticker_id = str(sticker_info.get('file_id', '') or '')
             sticker_emoji = sticker_info.get('emoji', '⭐') or '⭐'
             sticker_pack = sticker_info.get('set_name', '') or ''
+            media_type = 'sticker'
+            if bot_token and sticker_id:
+                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
+                    try:
+                        f_res = requests.get(
+                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                            params={'file_id': sticker_id},
+                            timeout=5
+                        ).json()
+                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                            file_path = f_res['result'].get('file_path')
+                            if file_path:
+                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                    except Exception as e:
+                        logger.warning(f"Error fetching sticker file path: {e}")
+            if not media_url:
+                media_url = f"https://api.telegram.org/file/bot{bot_token}/{sticker_id}" if bot_token and sticker_id else ""
             if not text_content:
                 text_content = f"{sticker_emoji} [{sticker_id}]" if sticker_id else sticker_emoji
 
@@ -1038,7 +1219,8 @@ class TelegramBotGateway:
             ws_payload["sticker"] = {
                 "id": sticker_id,
                 "emoji": sticker_emoji,
-                "packId": sticker_pack
+                "packId": sticker_pack,
+                "url": media_url or ""
             }
 
         cls.notify_operator_via_websocket(operator_id, ws_payload)

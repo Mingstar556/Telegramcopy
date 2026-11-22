@@ -15,7 +15,7 @@ import { useAuth } from './AuthContext';
 import { useTheme } from './ThemeContext';
 import { useNotification } from './NotificationContext';
 import { getStoredItem, setStoredItem } from '../utils/storage';
-import { compressImage } from '../utils/imageCompressor';
+import { compressImage, svgToPngDataUrl } from '../utils/imageCompressor';
 
 interface ChatContextValue {
   conversations: ChatConversation[];
@@ -54,6 +54,9 @@ interface ChatContextValue {
   openSavedMessages: () => void;
   refreshChats: () => Promise<void>;
   clearChat: (chatId: string) => void;
+  deleteChat: (chatId: string) => void;
+  toggleMuteChat: (chatId: string) => void;
+  isChatMuted: (chatId: string) => boolean;
   // Drafts
   setDraft: (chatId: string, draft: string) => void;
   getDraft: (chatId: string) => string;
@@ -154,7 +157,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Sync state to local storage when changed
   useEffect(() => {
-    if (userId && conversations.length > 0) {
+    if (userId) {
       setStoredItem(CONVERSATIONS_KEY, conversations);
     }
   }, [conversations, userId]);
@@ -538,22 +541,30 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!incomingMsg.isOutgoing) {
         if (!isCurrentActive) {
-          playReceiveSound();
+          const targetConv = conversations.find(c => c.id === chatId);
+          const isMuted = Boolean(targetConv?.isMuted);
+
+          if (!isMuted) {
+            playReceiveSound();
+          }
+
           setUnseenChatIds(prevUnseen => ({ ...prevUnseen, [chatId]: true }));
           const mediaType = incomingMsg.media?.type;
           const previewText = incomingMsg.message && incomingMsg.message !== '[Photo]' && incomingMsg.message !== '[Video]' && incomingMsg.message !== '[Voice message]'
             ? (mediaType === 'video' ? `📹 ${incomingMsg.message}` : mediaType === 'photo' ? `📷 ${incomingMsg.message}` : incomingMsg.message)
             : (mediaType === 'voice' ? '🎤 Voice message' : mediaType === 'video' ? '📹 Video' : mediaType === 'photo' ? '📷 Photo' : mediaType === 'file' ? `📄 ${incomingMsg.media?.fileName || 'File'}` : 'New incoming message');
 
-          notify({
-            title: senderName,
-            message: previewText,
-            type: 'message',
-            avatar: senderAvatar,
-            chatId,
-            actionLabel: 'Open Chat',
-            onAction: () => selectChat(chatId)
-          });
+          if (!isMuted) {
+            notify({
+              title: senderName,
+              message: previewText,
+              type: 'message',
+              avatar: senderAvatar,
+              chatId,
+              actionLabel: 'Open Chat',
+              onAction: () => selectChat(chatId)
+            });
+          }
         } else {
           dismissByChatId(chatId);
         }
@@ -862,6 +873,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendSticker = async (sticker: StickerItem) => {
     if (!activeChatId || !account?.userId) return;
 
+    let stickerUrl = sticker.url || '';
+    if (!stickerUrl && sticker.svgContent) {
+      stickerUrl = await svgToPngDataUrl(sticker.svgContent, 512);
+    }
+
     playSendSound();
     const currentChatId = activeChatId;
     const msgId = 'sticker_' + Date.now();
@@ -879,7 +895,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sticker: {
         id: sticker.id,
         packId: sticker.packId,
-        url: sticker.url || '',
+        url: stickerUrl,
         emoji: sticker.emoji,
         name: sticker.name,
         isCustom: sticker.isCustom
@@ -896,11 +912,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       "to-user": currentChatId,
       "message": `[Sticker: ${sticker.name}]`,
       "action": "send_sticker",
-      "file": sticker.url || '',
+      "file": stickerUrl,
       "sticker": {
         id: sticker.id,
         packId: sticker.packId,
-        emoji: sticker.emoji
+        emoji: sticker.emoji,
+        url: stickerUrl
       }
     };
 
@@ -1421,6 +1438,56 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   };
 
+  // DELETE CHAT
+  const deleteChat = (chatId: string) => {
+    setConversations(prev => prev.filter(c => c.id !== chatId));
+    setMessagesByChat(prev => {
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setDraftsByChat(prev => {
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+
+    if (activeChatIdRef.current === chatId) {
+      setActiveChatId(null);
+    }
+
+    dismissByChatId(chatId);
+
+    notify({
+      title: 'Chat Deleted',
+      message: 'Conversation and history have been removed',
+      type: 'info'
+    });
+  };
+
+  // TOGGLE MUTE CHAT
+  const toggleMuteChat = (chatId: string) => {
+    setConversations(prev =>
+      prev.map(c => {
+        if (c.id === chatId) {
+          const nextMuted = !c.isMuted;
+          notify({
+            title: nextMuted ? 'Chat Muted' : 'Chat Unmuted',
+            message: nextMuted ? 'Notifications silenced for this chat' : 'Notifications enabled for this chat',
+            type: 'info'
+          });
+          return { ...c, isMuted: nextMuted };
+        }
+        return c;
+      })
+    );
+  };
+
+  const isChatMuted = (chatId: string): boolean => {
+    const conv = conversations.find(c => c.id === chatId);
+    return Boolean(conv?.isMuted);
+  };
+
   // User Profile Open / Close
   const openUserProfile = (user: TelegramUser) => {
     setSelectedUserProfile(user);
@@ -1469,6 +1536,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openSavedMessages,
         refreshChats,
         clearChat,
+        deleteChat,
+        toggleMuteChat,
+        isChatMuted,
         setDraft,
         getDraft,
         selectedUserProfile,

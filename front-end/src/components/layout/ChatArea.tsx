@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ArrowLeft, MoreVertical, Search, Bot } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -6,6 +6,7 @@ import { Avatar } from '../common/Avatar';
 import { QuickAppearancePopover } from '../common/QuickAppearancePopover';
 import { ChatBar } from '../chat/ChatBar';
 import { MessageList } from '../chat/MessageList';
+import { ChatOptionsMenu } from '../chat/ChatOptionsMenu';
 
 interface ChatAreaProps {
   onBackToSidebar: () => void;
@@ -14,6 +15,7 @@ interface ChatAreaProps {
 export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
   const { activeChat, openUserProfile } = useChat();
   const { theme, settings } = useTheme();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isGold = theme === 'black-gold';
 
@@ -97,12 +99,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
             >
               <Search className="w-4 h-4" />
             </button>
-            <button
-              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/5 hover:text-white transition btn-press"
-              title="Info"
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition btn-press ${
+                  isMenuOpen ? 'bg-white/10 text-white' : 'hover:bg-white/5 hover:text-white'
+                }`}
+                title="Chat Options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+
+              <ChatOptionsMenu
+                isOpen={isMenuOpen}
+                onClose={() => setIsMenuOpen(false)}
+                chat={activeChat}
+              />
+            </div>
           </div>
         </div>
       ) : (

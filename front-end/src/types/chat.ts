@@ -81,6 +81,7 @@ export interface ChatConversation {
   isPinned?: boolean;
   isArchived?: boolean;
   isSavedMessages?: boolean;
+  isMuted?: boolean;
 }
 
 export interface OutgoingBackendPayload {
@@ -100,6 +101,7 @@ export interface OutgoingBackendPayload {
     id: string;
     packId: string;
     emoji: string;
+    url?: string;
   };
   "media"?: MediaItem;
   "album"?: MediaItem[];

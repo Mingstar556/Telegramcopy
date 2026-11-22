@@ -143,3 +143,35 @@ export function formatFileSize(bytes?: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+export async function svgToPngDataUrl(svgString: string, size = 512): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, size, size);
+          const dataUrl = canvas.toDataURL('image/png');
+          URL.revokeObjectURL(url);
+          resolve(dataUrl);
+          return;
+        }
+        URL.revokeObjectURL(url);
+        resolve('');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve('');
+      };
+      img.src = url;
+    } catch {
+      resolve('');
+    }
+  });
+}

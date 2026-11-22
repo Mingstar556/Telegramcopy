@@ -389,6 +389,114 @@ def user_profile(request):
     })
 
 
+@api_view(['POST', 'DELETE'])
+@permission_classes([AllowAny])
+def update_bot_avatar_view(request):
+    """
+    Allow holder of the bot to change or remove the bot's profile picture.
+    Uploads new photo to Telegram via setMyProfilePhoto and updates database record.
+    """
+    current_token = None
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if auth_header.startswith('Bearer '):
+        current_token = auth_header.split(' ', 1)[1].strip()
+    if not current_token:
+        current_token = request.data.get('token') or request.data.get('session_token') or request.query_params.get('token')
+
+    operator_id = None
+    if current_token:
+        sess = DeviceSession.objects.filter(session_token=current_token, is_active=True).select_related('employee').first()
+        if sess and sess.employee and sess.employee.is_active:
+            operator_id = sess.employee.user_id
+
+    if not operator_id:
+        operator_id = request.data.get('User-ID') or request.data.get('userId') or request.query_params.get('User-ID') or request.query_params.get('userId')
+
+    if not operator_id:
+        return Response({'detail': 'User-ID or authentication required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    operator_id_str = str(operator_id).strip()
+    bot = BotAccount.objects.filter(user_id=operator_id_str).first()
+    emp = EmployeeAccount.objects.filter(user_id=operator_id_str).first()
+
+    if not bot and not emp:
+        return Response({'detail': 'Operator bot account not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Handle DELETE (Remove bot profile photo)
+    if request.method == 'DELETE':
+        tg_res = None
+        if bot and bot.bot_token:
+            tg_res = TelegramBotGateway.remove_bot_profile_photo(bot.bot_token)
+        if bot:
+            bot.avatar = ""
+            bot.save(update_fields=['avatar'])
+        if emp:
+            emp.avatar = ""
+            emp.save(update_fields=['avatar'])
+        return Response({'success': True, 'avatar': '', 'telegram': tg_res})
+
+    # Handle POST (Upload and set bot profile photo)
+    file_obj = request.FILES.get('avatar') or request.FILES.get('file') or request.FILES.get('photo')
+    photo_bytes = None
+    filename = 'avatar.jpg'
+
+    if file_obj:
+        if file_obj.size > MAX_FILE_SIZE:
+            return Response({'detail': f'File exceeds maximum size limit ({MAX_FILE_SIZE // (1024 * 1024)}MB)'}, status=status.HTTP_400_BAD_REQUEST)
+        filename = os.path.basename(file_obj.name)
+        photo_bytes = file_obj.read()
+    else:
+        # Check base64
+        b64_str = request.data.get('avatar') or request.data.get('photo') or request.data.get('file')
+        if isinstance(b64_str, str) and b64_str.startswith('data:'):
+            try:
+                import base64
+                header, raw_b64 = b64_str.split(';base64,', 1)
+                mime = header.split(':', 1)[1] if ':' in header else 'image/jpeg'
+                ext = '.png' if 'png' in mime else ('.webp' if 'webp' in mime else '.jpg')
+                filename = f"avatar{ext}"
+                photo_bytes = base64.b64decode(raw_b64)
+            except Exception as e:
+                return Response({'detail': f'Invalid base64 image: {e}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not photo_bytes:
+        return Response({'detail': 'No avatar image file or base64 provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Save locally to avatars dir
+    avatars_dir = settings.MEDIA_ROOT / 'avatars'
+    os.makedirs(avatars_dir, exist_ok=True)
+    clean_id = bot.bot_token.split(':', 1)[0].strip() if bot and ':' in bot.bot_token else operator_id_str
+    _, ext = os.path.splitext(filename)
+    if not ext:
+        ext = '.jpg'
+    saved_filename = f"bot_{clean_id}_{int(time.time())}{ext}"
+    saved_path = avatars_dir / saved_filename
+    with open(saved_path, 'wb') as f:
+        f.write(photo_bytes)
+
+    relative_url = f"{settings.MEDIA_URL}avatars/{saved_filename}"
+    absolute_url = request.build_absolute_uri(relative_url)
+
+    tg_res = None
+    if bot and bot.bot_token:
+        tg_res = TelegramBotGateway.set_bot_profile_photo(bot.bot_token, photo_bytes, filename=saved_filename)
+
+    if bot:
+        bot.avatar = relative_url
+        bot.save(update_fields=['avatar'])
+    if emp:
+        emp.avatar = relative_url
+        emp.save(update_fields=['avatar'])
+
+    return Response({
+        'success': True,
+        'avatar': absolute_url,
+        'avatar_url': absolute_url,
+        'relative_url': relative_url,
+        'telegram': tg_res
+    })
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def chats_list(request):
@@ -423,12 +531,23 @@ def chats_list(request):
         except Exception as e:
             logger.warning(f"[Chats List] Auto-sync failed gracefully: {e}")
 
+    # Resolve all operator user_ids associated with this operator (including linked bot accounts and shared tokens)
+    allowed_operator_ids = {str(operator_id)}
+    bot = BotAccount.objects.filter(Q(user_id=operator_id) | Q(employee__user_id=operator_id)).select_related('employee').first()
+    if bot:
+        allowed_operator_ids.add(str(bot.user_id))
+        if bot.employee:
+            allowed_operator_ids.add(str(bot.employee.user_id))
+        if bot.bot_token:
+            for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
+                allowed_operator_ids.add(str(s_uid))
+
     # Find Telegram users who have conversation history with this specific operator account
     interacted_user_ids = set()
     for s_id, t_id in ChatMessage.objects.filter(
-        Q(sender_id=operator_id) | Q(to_user=operator_id)
+        Q(sender_id__in=allowed_operator_ids) | Q(to_user__in=allowed_operator_ids)
     ).values_list('sender_id', 'to_user'):
-        interacted_user_ids.add(t_id if s_id == operator_id else s_id)
+        interacted_user_ids.add(t_id if s_id in allowed_operator_ids else s_id)
 
     # Exclude internal saved_messages from external client users
     interacted_user_ids.discard('saved_messages')
@@ -543,9 +662,19 @@ def messages_history(request):
         if str(operator_id).strip() != sess.employee.user_id:
             return Response({'detail': 'Forbidden: session does not belong to requested user'}, status=status.HTTP_403_FORBIDDEN)
 
+    allowed_operator_ids = {str(operator_id)}
+    bot = BotAccount.objects.filter(Q(user_id=operator_id) | Q(employee__user_id=operator_id)).select_related('employee').first()
+    if bot:
+        allowed_operator_ids.add(str(bot.user_id))
+        if bot.employee:
+            allowed_operator_ids.add(str(bot.employee.user_id))
+        if bot.bot_token:
+            for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
+                allowed_operator_ids.add(str(s_uid))
+
     messages = ChatMessage.objects.filter(
-        (Q(sender_id=operator_id) & Q(to_user=to_user)) |
-        (Q(sender_id=to_user) & Q(to_user=operator_id))
+        (Q(sender_id__in=allowed_operator_ids) & Q(to_user=to_user)) |
+        (Q(sender_id=to_user) & Q(to_user__in=allowed_operator_ids))
     ).order_by('created_at')
 
     target_user = TelegramUser.objects.filter(telegram_id=to_user).first()
@@ -607,6 +736,8 @@ def send_message(request):
     action = request.data.get('action') or request.data.get('Action', 'send_message')
     raw_sticker = request.data.get('sticker')
     sticker = raw_sticker if isinstance(raw_sticker, dict) else None
+    if sticker and not sticker.get('url') and request.data.get('file'):
+        sticker['url'] = request.data.get('file')
     raw_media = request.data.get('media')
     media = raw_media if isinstance(raw_media, dict) else None
     raw_album = request.data.get('album')
@@ -675,8 +806,8 @@ def send_message(request):
         action=action,
         is_outgoing=True,
         status='sent',
-        media_type=media.get('type') if isinstance(media, dict) else None,
-        media_url=media.get('url') if isinstance(media, dict) else None,
+        media_type='sticker' if action == 'send_sticker' else (media.get('type') if isinstance(media, dict) else None),
+        media_url=(sticker.get('url') if isinstance(sticker, dict) else None) or (media.get('url') if isinstance(media, dict) else None),
         media_filename=media.get('fileName') if isinstance(media, dict) else None,
         media_duration=media.get('duration', 0) if isinstance(media, dict) else 0,
         sticker_id=sticker.get('id') if isinstance(sticker, dict) else None,
@@ -845,9 +976,15 @@ def telegram_webhook(request, user_id=None):
         request.query_params.get('User-ID') or
         request.query_params.get('userId') or
         (request.data.get('User-ID') if isinstance(request.data, dict) else None) or
-        (request.data.get('userId') if isinstance(request.data, dict) else None) or
-        '1234'
+        (request.data.get('userId') if isinstance(request.data, dict) else None)
     )
+    if not operator_id:
+        active_sess = DeviceSession.objects.filter(is_active=True).select_related('employee').first()
+        if active_sess and active_sess.employee:
+            operator_id = active_sess.employee.user_id
+        else:
+            first_bot = BotAccount.objects.exclude(bot_token="").first()
+            operator_id = first_bot.user_id if first_bot else '1234'
     update = request.data
     # Blue Team Defense: Validate incoming message payload against dangerous scripts or phishing
     msg_obj = update.get('message') or update.get('edited_message') if isinstance(update, dict) else None

@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import logging
 import threading
 from typing import Dict, Optional, Set
@@ -55,7 +56,7 @@ class BotPollerThread(threading.Thread):
             try:
                 params = {
                     'timeout': 25,
-                    'allowed_updates': '["message", "edited_message", "callback_query"]'
+                    'allowed_updates': json.dumps(["message", "edited_message", "callback_query", "channel_post", "edited_channel_post"])
                 }
                 if self.last_update_id > 0:
                     params['offset'] = self.last_update_id + 1
@@ -78,13 +79,16 @@ class BotPollerThread(threading.Thread):
                                     TelegramBotGateway._last_update_id = max(TelegramBotGateway._last_update_id, up_id)
 
                             try:
-                                TelegramBotGateway.handle_incoming_telegram_update(self.user_id, update)
+                                from .models import BotAccount
+                                ops = list(BotAccount.objects.filter(bot_token=self.bot_token).values_list('user_id', flat=True))
+                                target_op = self.user_id if self.user_id in ops else (ops[0] if ops else self.user_id)
+                                TelegramBotGateway.handle_incoming_telegram_update(target_op, update)
                             except Exception as up_err:
                                 logger.error(f"[AutoPoller] Error processing update {up_id} for {self.user_id}: {up_err}")
                 elif res.status_code == 409:
-                    # Webhook is configured on Telegram for this bot
-                    logger.info(f"[AutoPoller] Webhook active for bot {self.user_id}. Pausing poller for 15s...")
-                    self.stop_event.wait(15)
+                    # Concurrency or active webhook
+                    logger.info(f"[AutoPoller] getUpdates returned 409 Conflict for {self.user_id}. Backing off 3s...")
+                    self.stop_event.wait(3)
                 elif res.status_code in (401, 404):
                     logger.warning(f"[AutoPoller] Invalid or revoked bot token for operator {self.user_id}. Sleeping 30s...")
                     self.stop_event.wait(30)
@@ -114,6 +118,7 @@ class AutoPollerEngine:
     """
     Singleton manager managing background long-polling workers across all active bot accounts.
     Guarantees instant message reception from Telegram without requiring external webhooks.
+    Deduplicates workers by bot_token so only ONE thread polls Telegram per token, preventing 409 conflicts.
     """
     _lock = threading.Lock()
     _pollers: Dict[str, BotPollerThread] = {}
@@ -129,7 +134,7 @@ class AutoPollerEngine:
 
     @classmethod
     def start_all(cls):
-        """Start pollers for all configured BotAccounts with a bot_token."""
+        """Start pollers for all configured BotAccounts with a bot_token (deduplicated by token)."""
         if cls._is_test_mode():
             return
 
@@ -150,12 +155,11 @@ class AutoPollerEngine:
             return
 
         with cls._lock:
-            if user_id in cls._pollers and cls._pollers[user_id].is_alive():
-                return
-
             from .models import BotAccount
             try:
                 bot = BotAccount.objects.filter(user_id=str(user_id)).first()
+                if not bot:
+                    bot = BotAccount.objects.filter(employee__user_id=str(user_id)).first()
                 if bot and bot.bot_token:
                     cls._ensure_bot_thread_locked(bot.user_id, bot.bot_token)
             except Exception as e:
@@ -163,12 +167,16 @@ class AutoPollerEngine:
 
     @classmethod
     def _ensure_bot_thread_locked(cls, user_id: str, bot_token: str):
-        existing = cls._pollers.get(user_id)
+        if not bot_token:
+            return
+        token_key = str(bot_token).strip()
+        existing = cls._pollers.get(token_key)
         if existing and existing.is_alive():
             return
 
-        thread = BotPollerThread(user_id=user_id, bot_token=bot_token)
-        cls._pollers[user_id] = thread
+        thread = BotPollerThread(user_id=user_id, bot_token=token_key)
+        cls._pollers[token_key] = thread
+        cls._pollers[str(user_id)] = thread
         thread.start()
 
     @classmethod
@@ -176,6 +184,6 @@ class AutoPollerEngine:
         """Stop all background poller threads."""
         with cls._lock:
             cls._running = False
-            for user_id, poller in list(cls._pollers.items()):
+            for token_or_user, poller in list(cls._pollers.items()):
                 poller.stop()
             cls._pollers.clear()

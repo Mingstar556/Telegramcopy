@@ -102,12 +102,12 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
         </div>
 
         {/* Media Preview Stage */}
-        <div className="flex-1 min-h-[220px] max-h-[380px] my-3 rounded-2xl bg-black/50 border border-white/5 flex items-center justify-center overflow-hidden relative select-none">
+        <div className="flex-1 min-h-[220px] max-h-[62vh] my-3 rounded-2xl bg-black/50 border border-white/5 flex items-center justify-center overflow-hidden relative select-none">
           {activeItem.type === 'photo' ? (
             <img
               src={activeItem.previewUrl}
               alt="Preview"
-              className="max-w-full max-h-[360px] object-contain rounded-xl"
+              className="max-w-full max-h-[58vh] w-auto h-auto object-contain rounded-xl select-none"
             />
           ) : activeItem.type === 'video' ? (
             <video

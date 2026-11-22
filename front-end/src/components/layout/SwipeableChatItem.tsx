@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Archive, Bot, Pin, Bookmark } from 'lucide-react';
+import { Archive, Bot, Pin, Bookmark, BellOff } from 'lucide-react';
 import { ChatConversation } from '../../types/chat';
 import { Avatar } from '../common/Avatar';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -231,6 +231,12 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
 
               {chat.user.isBot && !chat.isSavedMessages && (
                 <Bot className="w-3.5 h-3.5 text-[var(--color-accent)] inline flex-shrink-0" />
+              )}
+
+              {chat.isMuted && (
+                <span title="Muted" className="inline-flex items-center">
+                  <BellOff className="w-3 h-3 text-[var(--color-text-muted)] inline flex-shrink-0 opacity-70" />
+                </span>
               )}
             </span>
 

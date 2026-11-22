@@ -45,8 +45,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             action=action or 'send_message',
             is_outgoing=True,
             status='sent',
-            media_type=media.get('type') if isinstance(media, dict) else None,
-            media_url=media.get('url') if isinstance(media, dict) else None,
+            media_type='sticker' if action == 'send_sticker' else (media.get('type') if isinstance(media, dict) else None),
+            media_url=(sticker.get('url') if isinstance(sticker, dict) else None) or (media.get('url') if isinstance(media, dict) else None),
             media_filename=media.get('fileName') or media.get('file_name') if isinstance(media, dict) else None,
             media_duration=media.get('duration', 0) if isinstance(media, dict) else 0,
             sticker_id=sticker.get('id') if isinstance(sticker, dict) else None,
@@ -64,6 +64,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def ensure_poller_started(self, operator_id: str):
         from telegram_chat.poller import AutoPollerEngine
         AutoPollerEngine.ensure_bot_polling(operator_id)
+
+    @database_sync_to_async
+    def get_related_operator_ids(self, user_id: str):
+        from telegram_chat.models import BotAccount, EmployeeAccount
+        from django.db.models import Q
+        ids = {str(user_id)}
+        try:
+            bot = BotAccount.objects.filter(Q(user_id=user_id) | Q(employee__user_id=user_id)).select_related('employee').first()
+            if bot:
+                ids.add(str(bot.user_id))
+                if bot.employee:
+                    ids.add(str(bot.employee.user_id))
+                if bot.bot_token:
+                    for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
+                        ids.add(str(s_uid))
+        except Exception:
+            pass
+        return list(ids)
 
     async def connect(self):
         query_string = self.scope.get('query_string', b'').decode('utf-8')
@@ -97,23 +115,28 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return
 
         self.user_id = valid_user_id
-
         self.room_group = f"operator_{self.user_id}"
+        self.related_rooms = []
 
-        # Join operator group
-        await self.channel_layer.group_add(
-            self.room_group,
-            self.channel_name
-        )
+        # Join operator group & all sibling bot rooms
+        related_ids = await self.get_related_operator_ids(self.user_id)
+        for rid in related_ids:
+            r_group = f"operator_{rid}"
+            await self.channel_layer.group_add(r_group, self.channel_name)
+            self.related_rooms.append(r_group)
+
         await self.accept()
-        logger.info(f"[WebSocket] Operator {self.user_id} connected to {self.room_group} (token={bool(token)})")
+        logger.info(f"[WebSocket] Operator {self.user_id} connected to {self.related_rooms} (token={bool(token)})")
 
         # Make sure background bot poller is active for instant message reception
         await self.ensure_poller_started(self.user_id)
 
     async def disconnect(self, close_code):
-        # Leave operator group
-        if hasattr(self, 'room_group'):
+        # Leave all operator groups
+        if hasattr(self, 'related_rooms'):
+            for r_group in self.related_rooms:
+                await self.channel_layer.group_discard(r_group, self.channel_name)
+        elif hasattr(self, 'room_group'):
             await self.channel_layer.group_discard(
                 self.room_group,
                 self.channel_name
@@ -159,6 +182,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
         to_user = payload.get('to-user') or payload.get('to_user') or payload.get('to_userid')
         text = payload.get('message', '')
         sticker = payload.get('sticker') if isinstance(payload.get('sticker'), dict) else None
+        file_url = payload.get('file')
+        if sticker and file_url and not sticker.get('url'):
+            sticker['url'] = file_url
         media = payload.get('media') if isinstance(payload.get('media'), dict) else None
 
         if not to_user:

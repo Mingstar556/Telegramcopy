@@ -11,6 +11,8 @@ interface AuthContextValue extends AuthState {
   removeAccount: (userId: string) => void;
   logout: () => void;
   refreshUserData: () => Promise<void>;
+  updateBotAvatar: (file: File) => Promise<string>;
+  removeBotAvatar: () => Promise<void>;
   isMockMode: boolean;
   setMockMode: (val: boolean) => void;
 }
@@ -172,6 +174,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateBotAvatar = async (file: File): Promise<string> => {
+    if (!authState.account?.userId) throw new Error('Not authenticated');
+    const { avatarUrl } = await api.updateBotAvatar(file, authState.token || undefined, authState.account.userId);
+    const updatedAccount: BotAccount = { ...authState.account, avatar: avatarUrl };
+    localStorage.setItem('tg_bot_account', JSON.stringify(updatedAccount));
+    setAuthState(prev => {
+      const updatedAccounts = prev.accounts.map(a =>
+        a.userId === updatedAccount.userId ? updatedAccount : a
+      );
+      setStoredItem('tg_saved_accounts', updatedAccounts);
+      return {
+        ...prev,
+        account: updatedAccount,
+        accounts: updatedAccounts
+      };
+    });
+    return avatarUrl;
+  };
+
+  const removeBotAvatar = async (): Promise<void> => {
+    if (!authState.account?.userId) throw new Error('Not authenticated');
+    await api.removeBotAvatar(authState.token || undefined, authState.account.userId);
+    const updatedAccount: BotAccount = { ...authState.account, avatar: '' };
+    localStorage.setItem('tg_bot_account', JSON.stringify(updatedAccount));
+    setAuthState(prev => {
+      const updatedAccounts = prev.accounts.map(a =>
+        a.userId === updatedAccount.userId ? updatedAccount : a
+      );
+      setStoredItem('tg_saved_accounts', updatedAccounts);
+      return {
+        ...prev,
+        account: updatedAccount,
+        accounts: updatedAccounts
+      };
+    });
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -182,6 +221,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         removeAccount,
         logout,
         refreshUserData,
+        updateBotAvatar,
+        removeBotAvatar,
         isMockMode,
         setMockMode
       }}

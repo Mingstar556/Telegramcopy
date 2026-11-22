@@ -231,6 +231,65 @@ class ApiService {
   }
 
   /**
+   * Change bot profile photo on Telegram and backend
+   */
+  async updateBotAvatar(file: File | Blob, token?: string, userId?: string): Promise<{ success: boolean; avatarUrl: string }> {
+    if (this.useMock) {
+      const url = URL.createObjectURL(file);
+      return { success: true, avatarUrl: url };
+    }
+    const base = this.getBaseUrl();
+    const formData = new FormData();
+    formData.append('avatar', file);
+    if (userId) formData.append('User-ID', userId);
+
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${base}/api/user/profile/avatar/`, {
+      method: 'POST',
+      headers,
+      body: formData
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to update bot avatar');
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      avatarUrl: resolveMediaUrl(data.avatar || data.avatar_url)
+    };
+  }
+
+  /**
+   * Remove bot profile photo
+   */
+  async removeBotAvatar(token?: string, userId?: string): Promise<{ success: boolean }> {
+    if (this.useMock) {
+      return { success: true };
+    }
+    const base = this.getBaseUrl();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const userParam = userId ? `?User-ID=${encodeURIComponent(userId)}` : '';
+
+    const res = await fetch(`${base}/api/user/profile/avatar/${userParam}`, {
+      method: 'DELETE',
+      headers
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Failed to remove bot avatar');
+    }
+
+    return { success: true };
+  }
+
+  /**
    * Fetch chat list from Django backend with optional Telegram auto-sync
    */
   async fetchConversations(userId: string, token?: string, sync?: boolean): Promise<ChatConversation[]> {

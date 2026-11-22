@@ -7,6 +7,7 @@ urlpatterns = [
     path('auth/logout/', views.logout_view, name='logout'),
     path('auth/sessions/', views.active_sessions_view, name='active_sessions'),
     path('user/profile/', views.user_profile, name='user_profile'),
+    path('user/profile/avatar/', views.update_bot_avatar_view, name='update_bot_avatar'),
     path('chats/', views.chats_list, name='chats_list'),
     path('messages/', views.messages_history, name='messages_history'),
     path('messages/send/', views.send_message, name='send_message'),

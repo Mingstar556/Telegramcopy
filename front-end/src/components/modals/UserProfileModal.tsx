@@ -33,14 +33,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onClose
 }) => {
   const { theme } = useTheme();
-  const { activeMessages, clearChat, selectChat } = useChat();
+  const { activeMessages, clearChat, deleteChat, toggleMuteChat, isChatMuted, selectChat } = useChat();
   const [activeTab, setActiveTab] = useState<'media' | 'files' | 'voice'>('media');
-  const [isMuted, setIsMuted] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!isOpen || !user) return null;
 
   const isGold = theme === 'black-gold';
+  const isMuted = isChatMuted(user.id);
   const fullName = `${user.firstName} ${user.lastName || ''}`.trim();
 
   // Filter media items from active conversation
@@ -60,6 +60,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const handleClearHistory = () => {
     if (window.confirm(`Are you sure you want to clear chat history with ${fullName}?`)) {
       clearChat(user.id);
+      onClose();
+    }
+  };
+
+  const handleDeleteChat = () => {
+    if (window.confirm(`Delete chat with ${fullName}? This cannot be undone.`)) {
+      deleteChat(user.id);
       onClose();
     }
   };
@@ -137,7 +144,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </button>
 
             <button
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={() => toggleMuteChat(user.id)}
               className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-xs flex items-center gap-1.5 transition btn-press"
             >
               {isMuted ? <Bell className="w-4 h-4 text-emerald-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
@@ -276,13 +283,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
         {/* Footer Actions */}
         <div className="pt-3 border-t border-white/5 flex items-center justify-between">
-          <button
-            onClick={handleClearHistory}
-            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-red-500/10 transition btn-press"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>Clear History</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearHistory}
+              className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-amber-500/10 transition btn-press"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Clear History</span>
+            </button>
+
+            <button
+              onClick={handleDeleteChat}
+              className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-red-500/10 transition btn-press"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Chat</span>
+            </button>
+          </div>
 
           <button
             onClick={onClose}

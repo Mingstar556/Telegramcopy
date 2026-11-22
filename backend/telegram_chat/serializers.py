@@ -39,7 +39,7 @@ def format_message_dict(msg: ChatMessage) -> dict:
             'id': msg.sticker_id,
             'packId': msg.sticker_pack or '',
             'emoji': msg.sticker_emoji or '⭐',
-            'url': '',
+            'url': msg.media_url or '',
             'name': msg.sticker_id,
         }
 

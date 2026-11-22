@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   X,
   RefreshCw,
@@ -12,7 +12,8 @@ import {
   Trash2,
   Lock,
   User as UserIcon,
-  Sparkles
+  Sparkles,
+  Camera
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -25,13 +26,15 @@ interface AccountModalProps {
 }
 
 export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) => {
-  const { account, accounts, switchAccount, addAccount, removeAccount, refreshUserData } = useAuth();
+  const { account, accounts, switchAccount, addAccount, removeAccount, refreshUserData, updateBotAvatar, removeBotAvatar } = useAuth();
   const { theme } = useTheme();
   const { notify } = useNotification();
 
   const [activeView, setActiveView] = useState<'profile' | 'accounts' | 'add'>('profile');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
   const [copied, setCopied] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Add Account form state
   const [newUserId, setNewUserId] = useState('');
@@ -42,6 +45,69 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
   if (!isOpen || !account) return null;
 
   const isGold = theme === 'black-gold';
+
+  const handleAvatarFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      notify({
+        title: 'Invalid File',
+        message: 'Please choose an image file (PNG, JPG, or WEBP)',
+        type: 'alert'
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      notify({
+        title: 'File Too Large',
+        message: 'Avatar image must be under 5MB',
+        type: 'alert'
+      });
+      return;
+    }
+
+    setIsUpdatingAvatar(true);
+    try {
+      await updateBotAvatar(file);
+      notify({
+        title: 'Bot Profile Picture Updated',
+        message: 'New avatar synced to Telegram and web app successfully',
+        type: 'success'
+      });
+    } catch (err: any) {
+      notify({
+        title: 'Update Failed',
+        message: err.message || 'Could not update Telegram bot avatar',
+        type: 'alert'
+      });
+    } finally {
+      setIsUpdatingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!account.avatar) return;
+    setIsUpdatingAvatar(true);
+    try {
+      await removeBotAvatar();
+      notify({
+        title: 'Avatar Removed',
+        message: 'Bot profile picture removed from Telegram',
+        type: 'info'
+      });
+    } catch (err: any) {
+      notify({
+        title: 'Remove Failed',
+        message: err.message || 'Could not remove bot avatar',
+        type: 'alert'
+      });
+    } finally {
+      setIsUpdatingAvatar(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -157,7 +223,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
         {activeView === 'profile' && (
           <div className="overflow-y-auto flex-1">
             <div className="flex flex-col items-center text-center pb-5 border-b border-white/5">
-              <div className="mb-3">
+              <div className="mb-2 relative group">
                 <Avatar
                   id={account.userId}
                   name={account.botName}
@@ -165,6 +231,54 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
                   size="xl"
                   isOnline={true}
                 />
+
+                {/* Floating change avatar overlay button */}
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isUpdatingAvatar}
+                  className="absolute bottom-0 right-0 p-2 rounded-full bg-[var(--color-accent)] text-[var(--color-accent-text)] shadow-lg hover:scale-110 active:scale-95 transition-all flex items-center justify-center border-2 border-[#121318]"
+                  title="Change Bot Profile Picture on Telegram"
+                >
+                  {isUpdatingAvatar ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleAvatarFileSelected}
+              />
+
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isUpdatingAvatar}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] font-medium text-white flex items-center gap-1.5 transition btn-press border border-white/5"
+                >
+                  <Camera className="w-3 h-3 text-[var(--color-accent)]" />
+                  <span>{isUpdatingAvatar ? 'Updating...' : 'Change Bot Photo'}</span>
+                </button>
+
+                {account.avatar && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    disabled={isUpdatingAvatar}
+                    className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[11px] font-medium flex items-center gap-1.5 transition btn-press border border-red-500/20"
+                    title="Remove custom photo from Telegram"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Remove</span>
+                  </button>
+                )}
               </div>
               <h4 className="text-xl font-bold tracking-tight">{account.botName}</h4>
               <span className="text-xs text-[var(--color-text-muted)] mt-0.5 font-mono">
