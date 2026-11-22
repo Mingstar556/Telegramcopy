@@ -54,14 +54,14 @@ class BotPollerThread(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 params = {
-                    'timeout': 20,
+                    'timeout': 25,
                     'allowed_updates': '["message", "edited_message", "callback_query"]'
                 }
                 if self.last_update_id > 0:
                     params['offset'] = self.last_update_id + 1
 
                 url = f"{TELEGRAM_API_BASE}/bot{self.bot_token}/getUpdates"
-                res = self.session.get(url, params=params, timeout=28)
+                res = self.session.get(url, params=params, timeout=35)
 
                 if res.status_code == 200:
                     data = res.json()

@@ -10,6 +10,8 @@ export interface TelegramUser {
   employeeBadge?: string;
   bio?: string;
   phone?: string;
+  languageCode?: string;
+  isPremium?: boolean;
 }
 
 export interface MediaItem {

@@ -56,4 +56,7 @@ def format_user_dict(user: TelegramUser) -> dict:
         'isBot': False,
         'online': user.is_online,
         'lastSeen': user.last_seen or 'recently',
+        'languageCode': getattr(user, 'language_code', None) or '',
+        'isPremium': bool(getattr(user, 'is_premium', False)),
+        'bio': getattr(user, 'bio', None) or '',
     }

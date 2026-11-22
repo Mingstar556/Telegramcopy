@@ -22,6 +22,29 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
+class OutboundRateLimiter:
+    """Token bucket rate limiter enforcing ~30 messages/second ceiling for Telegram Bot API."""
+    def __init__(self, rate: float = 30.0, capacity: float = 30.0):
+        self.rate = rate
+        self.capacity = capacity
+        self.tokens = capacity
+        self.last_check = time.monotonic()
+        self.lock = threading.Lock()
+
+    def acquire(self):
+        with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.last_check
+            self.last_check = now
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+            if self.tokens < 1.0:
+                sleep_time = (1.0 - self.tokens) / self.rate
+                time.sleep(sleep_time)
+                self.tokens = 0.0
+            else:
+                self.tokens -= 1.0
+
+
 class TelegramBotGateway:
     """
     Scalable Multi-Bot Gateway service.
@@ -34,6 +57,7 @@ class TelegramBotGateway:
     _sync_lock: threading.Lock = threading.Lock()
     _http_session: Optional[requests.Session] = None
     _outbound_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=8, thread_name_prefix='tg_outbound')
+    _rate_limiter: OutboundRateLimiter = OutboundRateLimiter(rate=30.0, capacity=30.0)
 
     @classmethod
     def get_http_session(cls) -> requests.Session:
@@ -162,6 +186,12 @@ class TelegramBotGateway:
                         photo_info = c_json['result'].get('photo')
                         if isinstance(photo_info, dict):
                             file_id = photo_info.get('big_file_id') or photo_info.get('small_file_id')
+                        bio_text = c_json['result'].get('bio')
+                        if bio_text and not is_bot:
+                            try:
+                                TelegramUser.objects.filter(telegram_id=clean_id).update(bio=bio_text)
+                            except Exception:
+                                pass
             except Exception as e:
                 logger.debug(f"[Avatar Fetch getChat] {clean_id}: {e}")
 
@@ -388,6 +418,34 @@ class TelegramBotGateway:
             }
 
     @classmethod
+    def set_webhook(cls, bot_token: str, webhook_url: str, secret_token: Optional[str] = None, allowed_updates: Optional[list] = None) -> Dict[str, Any]:
+        """Sets Telegram webhook for immediate push updates over HTTPS."""
+        payload = {
+            'url': webhook_url,
+            'allowed_updates': allowed_updates or ['message', 'edited_message', 'callback_query']
+        }
+        if secret_token:
+            payload['secret_token'] = secret_token
+        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/setWebhook"
+        resp = cls._post(url, json=payload, timeout=10)
+        return resp.json()
+
+    @classmethod
+    def delete_webhook(cls, bot_token: str, drop_pending_updates: bool = False) -> Dict[str, Any]:
+        """Deletes webhook, switching bot back to polling."""
+        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/deleteWebhook"
+        payload = {'drop_pending_updates': drop_pending_updates}
+        resp = cls._post(url, json=payload, timeout=10)
+        return resp.json()
+
+    @classmethod
+    def get_webhook_info(cls, bot_token: str) -> Dict[str, Any]:
+        """Fetches current webhook status from Telegram."""
+        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/getWebhookInfo"
+        resp = cls._get(url, timeout=10)
+        return resp.json()
+
+    @classmethod
     def send_telegram_message(
         cls,
         bot_token: Optional[str] = None,
@@ -405,6 +463,8 @@ class TelegramBotGateway:
         If token is missing, dummy, or offline/network error, returns simulated result payload
         or structured error dict.
         """
+        # Global outbound rate limiter (~30 msgs/sec limit)
+        cls._rate_limiter.acquire()
         if bot_token is None:
             if operator_id:
                 bot_token = cls.get_bot_token(operator_id)
@@ -647,6 +707,8 @@ class TelegramBotGateway:
         first_name = from_user.get('first_name') or from_user.get('title') or 'Telegram Customer'
         last_name = from_user.get('last_name') or ''
         username = from_user.get('username') or ''
+        language_code = from_user.get('language_code') or None
+        is_premium = bool(from_user.get('is_premium', False))
 
         bot_token = cls.get_bot_token(operator_id)
 
@@ -662,15 +724,20 @@ class TelegramBotGateway:
                 except Exception as e:
                     logger.debug(f"[Avatar Auto-Fetch Error] {e}")
 
+        # Fallback avatar if user hides photo or has none
+        if not avatar_url:
+            avatar_url = f"https://api.dicebear.com/7.x/bottts/svg?seed={telegram_id}"
+
         user_defaults = {
             'first_name': first_name,
             'last_name': last_name,
             'username': username,
+            'language_code': language_code,
+            'is_premium': is_premium,
             'is_online': True,
             'last_seen': 'online now',
+            'avatar': avatar_url,
         }
-        if avatar_url:
-            user_defaults['avatar'] = avatar_url
 
         # Upsert Telegram User
         try:

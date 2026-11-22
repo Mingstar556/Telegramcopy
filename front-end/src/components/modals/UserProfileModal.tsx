@@ -95,6 +95,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
           <h3 className="text-xl font-bold tracking-tight flex items-center gap-2">
             <span>{fullName}</span>
+            {user.isPremium && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-semibold flex items-center gap-1 border border-amber-400/30">
+                ⭐ Premium
+              </span>
+            )}
+            {user.languageCode && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-mono uppercase">
+                {user.languageCode}
+              </span>
+            )}
             {user.isBot && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--color-accent)]/20 text-[var(--color-accent)] font-semibold">
                 BOT

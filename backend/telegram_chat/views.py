@@ -5,6 +5,7 @@ import secrets
 import logging
 import requests
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from django.utils import timezone
 from django.conf import settings
 from django.db import OperationalError, IntegrityError
@@ -780,6 +781,9 @@ def media_upload(request):
     })
 
 
+_webhook_worker_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix='tg_webhook_worker')
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def telegram_webhook(request, user_id=None):
@@ -787,6 +791,7 @@ def telegram_webhook(request, user_id=None):
     Incoming Webhook from Telegram Bot API for operator {user_id}.
     When a customer messages the bot, Telegram POSTs the JSON payload here.
     Supports /api/telegram/webhook/<user_id>/ and /api/telegram/webhook/.
+    Returns HTTP 200 immediately (<2ms) and offloads processing to async worker pool.
     """
     webhook_secret = getattr(settings, 'TELEGRAM_WEBHOOK_SECRET', None) or os.environ.get('TELEGRAM_WEBHOOK_SECRET')
     if webhook_secret:
@@ -815,8 +820,48 @@ def telegram_webhook(request, user_id=None):
                 logger.warning(f"[SECURITY ALERT] Blocked malicious incoming message: {sec_err}")
                 return Response({"ok": False, "detail": sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
-    success = TelegramBotGateway.handle_incoming_telegram_update(operator_id, update)
-    return Response({"ok": success})
+    # Async Queue: offload DB/API processing to background thread pool, return 200 OK immediately
+    _webhook_worker_pool.submit(TelegramBotGateway.handle_incoming_telegram_update, operator_id, update)
+    return Response({"ok": True, "status": "queued"})
+
+
+@api_view(['GET', 'POST', 'DELETE'])
+@permission_classes([AllowAny])
+def manage_webhook(request):
+    """
+    Manage Telegram Webhook.
+    GET: Get current webhook status (getWebhookInfo).
+    POST: Set webhook to specified URL (setWebhook).
+    DELETE: Delete webhook (deleteWebhook, switches bot to long-polling).
+    """
+    operator_id = (
+        request.query_params.get('user_id') or
+        request.query_params.get('User-ID') or
+        (request.data.get('user_id') if isinstance(request.data, dict) else None) or
+        (request.data.get('User-ID') if isinstance(request.data, dict) else None) or
+        '1234'
+    )
+    bot_token = TelegramBotGateway.get_bot_token(operator_id)
+    if not bot_token:
+        return Response({"ok": False, "detail": "Bot token not configured"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'GET':
+        info = TelegramBotGateway.get_webhook_info(bot_token)
+        return Response(info)
+
+    if request.method == 'POST':
+        webhook_url = request.data.get('webhook_url') or request.data.get('url')
+        if not webhook_url:
+            return Response({"ok": False, "detail": "webhook_url is required"}, status=status.HTTP_400_BAD_REQUEST)
+        secret_token = request.data.get('secret_token') or getattr(settings, 'TELEGRAM_WEBHOOK_SECRET', None)
+        allowed_updates = request.data.get('allowed_updates') or ['message', 'edited_message', 'callback_query']
+        res = TelegramBotGateway.set_webhook(bot_token, webhook_url, secret_token, allowed_updates)
+        return Response(res)
+
+    if request.method == 'DELETE':
+        drop_pending = bool(request.data.get('drop_pending_updates', False))
+        res = TelegramBotGateway.delete_webhook(bot_token, drop_pending_updates=drop_pending)
+        return Response(res)
 
 
 def _extract_photo_blocks(request) -> list:
