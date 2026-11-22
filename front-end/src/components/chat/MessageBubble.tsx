@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Check,
   CheckCheck,
@@ -16,7 +16,9 @@ import {
   FileText,
   Download,
   AlertCircle,
-  Zap
+  Zap,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { PREINSTALLED_STICKER_PACKS } from '../../assets/stickers/stickerPacks';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -39,7 +41,31 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
   const { notify } = useNotification();
 
   const [expandedMediaUrl, setExpandedMediaUrl] = useState<string | null>(null);
+  const [expandedAlbumIndex, setExpandedAlbumIndex] = useState<number | null>(null);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [isSavedToast, setIsSavedToast] = useState(false);
+
+  // Keyboard navigation for photo group album viewer
+  useEffect(() => {
+    if (expandedAlbumIndex === null || !message.album || message.album.length <= 1) return;
+    const albumCount = message.album.length;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setExpandedAlbumIndex((prev) => (prev !== null ? (prev - 1 + albumCount) % albumCount : 0));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setExpandedAlbumIndex((prev) => (prev !== null ? (prev + 1) % albumCount : 0));
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setExpandedAlbumIndex(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expandedAlbumIndex, message.album]);
   const [copied, setCopied] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -506,7 +532,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
               {photos.slice(0, 4).map((p, idx) => (
                 <div
                   key={idx}
-                  onClick={() => setExpandedMediaUrl(p.url)}
+                  onClick={() => setExpandedAlbumIndex(idx)}
                   className={`relative cursor-pointer group/img overflow-hidden bg-black/40 ${count === 3 && idx === 0 ? 'col-span-2 aspect-[2/1]' : 'aspect-square'}`}
                 >
                   <img
@@ -554,23 +580,139 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
           {renderReactionBadges()}
         </div>
 
-        {/* Lightbox Modal for Photo Group */}
-        {expandedMediaUrl && (
+        {/* Full-Featured Album Gallery Lightbox with Next/Prev and Thumbnail Strip */}
+        {expandedAlbumIndex !== null && photos[expandedAlbumIndex] && (
           <div
-            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150"
-            onClick={() => setExpandedMediaUrl(null)}
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex flex-col justify-between p-3 sm:p-6 animate-in fade-in duration-150 select-none"
+            onClick={() => setExpandedAlbumIndex(null)}
           >
-            <button
-              onClick={() => setExpandedMediaUrl(null)}
-              className="absolute top-5 right-5 text-white/80 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition btn-press"
+            {/* Top Toolbar */}
+            <div
+              className="w-full flex items-center justify-between z-40 px-2 py-2"
+              onClick={(e) => e.stopPropagation()}
             >
-              <X className="w-5 h-5" />
-            </button>
-            <img
-              src={expandedMediaUrl}
-              alt="Full view"
-              className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl"
-            />
+              {/* Photo Counter Pill */}
+              <div className="px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-xs font-semibold text-white/90 flex items-center gap-2 shadow-lg">
+                <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+                <span>
+                  Photo {expandedAlbumIndex + 1} of {count}
+                </span>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <a
+                  href={photos[expandedAlbumIndex].url}
+                  download={`photo_${expandedAlbumIndex + 1}.jpg`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition btn-press border border-white/10"
+                  title="Download Photo"
+                >
+                  <Download className="w-4 h-4" />
+                </a>
+                <a
+                  href={photos[expandedAlbumIndex].url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition btn-press border border-white/10"
+                  title="Open Original in New Tab"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setExpandedAlbumIndex(null)}
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition btn-press border border-white/10"
+                  title="Close (Esc)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Main Stage with Left/Right Navigation and Touch Swipe */}
+            <div
+              className="relative flex-1 flex items-center justify-center w-full max-h-[75vh] sm:max-h-[80vh] my-auto"
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
+              onTouchEnd={(e) => {
+                if (touchStartX !== null) {
+                  const touchEndX = e.changedTouches[0].clientX;
+                  const diff = touchStartX - touchEndX;
+                  if (diff > 50) {
+                    // Swipe Left -> Next
+                    setExpandedAlbumIndex((prev) => (prev !== null ? (prev + 1) % count : 0));
+                  } else if (diff < -50) {
+                    // Swipe Right -> Prev
+                    setExpandedAlbumIndex((prev) => (prev !== null ? (prev - 1 + count) % count : 0));
+                  }
+                  setTouchStartX(null);
+                }
+              }}
+            >
+              {/* Previous Photo Arrow */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedAlbumIndex((prev) => (prev !== null ? (prev - 1 + count) % count : 0));
+                }}
+                className="absolute left-2 sm:left-6 z-40 p-3 sm:p-4 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white backdrop-blur-md border border-white/15 hover:scale-110 transition-all btn-press shadow-2xl"
+                title="Previous Photo (Left Arrow)"
+              >
+                <ChevronLeft className="w-6 h-6 sm:w-7 sm:h-7" />
+              </button>
+
+              {/* Active Photo */}
+              <img
+                key={photos[expandedAlbumIndex].url}
+                src={photos[expandedAlbumIndex].url}
+                alt={`Photo ${expandedAlbumIndex + 1}`}
+                className="max-w-full max-h-[70vh] sm:max-h-[78vh] object-contain rounded-2xl shadow-2xl animate-in zoom-in-95 duration-150 select-none"
+              />
+
+              {/* Next Photo Arrow */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedAlbumIndex((prev) => (prev !== null ? (prev + 1) % count : 0));
+                }}
+                className="absolute right-2 sm:right-6 z-40 p-3 sm:p-4 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white backdrop-blur-md border border-white/15 hover:scale-110 transition-all btn-press shadow-2xl"
+                title="Next Photo (Right Arrow)"
+              >
+                <ChevronRight className="w-6 h-6 sm:w-7 sm:h-7" />
+              </button>
+            </div>
+
+            {/* Bottom Thumbnail Strip for Fast Navigation */}
+            <div
+              className="w-full flex items-center justify-center z-40 pb-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="max-w-[94vw] sm:max-w-2xl overflow-x-auto flex items-center gap-2 p-2 rounded-2xl bg-black/70 backdrop-blur-xl border border-white/10 shadow-2xl scrollbar-none">
+                {photos.map((p, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedAlbumIndex(pIdx);
+                    }}
+                    className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden flex-shrink-0 transition-all duration-200 border-2 ${
+                      expandedAlbumIndex === pIdx
+                        ? 'border-[var(--color-accent)] scale-105 shadow-lg opacity-100 ring-2 ring-[var(--color-accent)]/30'
+                        : 'border-transparent opacity-50 hover:opacity-90 hover:scale-102'
+                    }`}
+                  >
+                    <img src={p.url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
