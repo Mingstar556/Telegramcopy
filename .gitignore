@@ -66,4 +66,10 @@ Thumbs.db
 # Standalone UserBot_chat application package
 !UserBot_chat/**
 UserBot_chat/**/__pycache__/
+UserBot_chat/**/.env
+UserBot_chat/**/.env.local
+UserBot_chat/**/db.sqlite3
+UserBot_chat/**/db.sqlite3-journal
+UserBot_chat/**/media/uploads/**
+
 

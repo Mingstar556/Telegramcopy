@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Bot, KeyRound, Loader2, Sparkles, User, ShieldCheck, Database, AlertOctagon, RotateCcw } from 'lucide-react';
+import { Bot, KeyRound, Loader2, Sparkles, User, ShieldCheck, AlertOctagon, RotateCcw, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 
 export const LoginModal: React.FC = () => {
-  const { login, isLoading, error, isMockMode, setMockMode } = useAuth();
+  const { login, isLoading, error } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [showRedErrorScreen, setShowRedErrorScreen] = useState(false);
   const [redScreenErrorMsg, setRedScreenErrorMsg] = useState('');
 
@@ -22,7 +23,7 @@ export const LoginModal: React.FC = () => {
     try {
       await login({ userId: userId.trim(), password: password.trim() });
     } catch {
-      triggerRedErrorScreen('Access Denied: Invalid User ID or Password');
+      triggerRedErrorScreen('Access Denied: Invalid User ID or Password.');
     }
   };
 
@@ -35,24 +36,18 @@ export const LoginModal: React.FC = () => {
     setShowRedErrorScreen(false);
   };
 
-  const handleQuickDemoFill = (id = '1234', pass = '1234') => {
-    setUserId(id);
-    setPassword(pass);
-    setShowRedErrorScreen(false);
-  };
-
   const isGold = theme === 'black-gold';
 
   // ----------------------------------------------------
-  // LOADING RED ERROR SCREEN (when login credentials fail)
+  // AUTHENTICATION ERROR SCREEN
   // ----------------------------------------------------
   if (showRedErrorScreen) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-red-950/95 backdrop-blur-xl animate-in fade-in duration-200">
         <div className="w-full max-w-md rounded-3xl p-8 border border-red-500/50 bg-[#1c0707] text-white shadow-[0_0_60px_rgba(239,68,68,0.4)] text-center flex flex-col items-center animate-bounce-short">
-          {/* Pulsing red alert icon */}
-          <div className="w-20 h-20 rounded-full bg-red-500/20 border-2 border-red-500 flex items-center justify-center mb-5 animate-pulse">
-            <AlertOctagon className="w-10 h-10 text-red-400 stroke-[2.3]" />
+          {/* Alert icon */}
+          <div className="w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-500 flex items-center justify-center mb-5 animate-pulse">
+            <AlertOctagon className="w-8 h-8 text-red-400 stroke-[2.3]" />
           </div>
 
           <h2 className="text-2xl font-extrabold text-red-200 tracking-tight">
@@ -63,28 +58,18 @@ export const LoginModal: React.FC = () => {
             {redScreenErrorMsg}
           </p>
 
-          <div className="my-5 p-3.5 rounded-2xl bg-red-900/30 border border-red-500/30 text-xs text-red-200 w-full space-y-1">
-            <div className="font-semibold text-white">Valid Test Account Credentials:</div>
-            <div>User ID: <span className="font-mono font-bold text-yellow-300">1234</span></div>
-            <div>Password: <span className="font-mono font-bold text-yellow-300">1234</span></div>
-          </div>
+          <p className="text-xs text-red-300/60 mt-3 mb-6">
+            Please verify your credentials and try again, or contact your terminal administrator for access.
+          </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 w-full">
-            <button
-              type="button"
-              onClick={() => handleQuickDemoFill('1234', '1234')}
-              className="flex-1 py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm shadow-lg transition active:scale-95 flex items-center justify-center gap-2"
-            >
-              <span>Autofill 1234</span>
-            </button>
-
+          <div className="w-full">
             <button
               type="button"
               onClick={handleDismissRedScreen}
-              className="py-3 px-5 rounded-xl border border-red-500/40 hover:bg-red-900/40 text-red-200 font-semibold text-sm transition active:scale-95 flex items-center justify-center gap-2"
+              className="w-full py-3.5 px-5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold text-sm shadow-lg transition active:scale-95 flex items-center justify-center gap-2"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Retry</span>
+              <span>Try Again</span>
             </button>
           </div>
         </div>
@@ -158,9 +143,11 @@ export const LoginModal: React.FC = () => {
               <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
               <input
                 type="text"
+                name="username"
+                autoComplete="username"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
-                placeholder="1234"
+                placeholder="Enter User ID"
                 autoFocus
                 className={`w-full pl-10 pr-4 py-3 rounded-2xl text-base sm:text-sm outline-none transition duration-200 border ${
                   isGold
@@ -178,16 +165,35 @@ export const LoginModal: React.FC = () => {
             <div className="relative">
               <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
+                name="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••"
-                className={`w-full pl-10 pr-4 py-3 rounded-2xl text-base sm:text-sm outline-none transition duration-200 border ${
+                placeholder="Enter Password"
+                className={`w-full pl-10 pr-11 py-3 rounded-2xl text-base sm:text-sm outline-none transition duration-200 border ${
                   isGold
                     ? 'bg-[#15130b] border-[#38301a] text-white focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]'
                     : 'bg-[#19222c] border-[#253242] text-white focus:border-[#2aabee] focus:ring-1 focus:ring-[#2aabee]'
                 }`}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className={`absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors focus:outline-none ${
+                  isGold
+                    ? 'text-[var(--color-text-muted)] hover:text-[#f3c853]'
+                    : 'text-[var(--color-text-muted)] hover:text-white'
+                }`}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
             </div>
           </div>
 

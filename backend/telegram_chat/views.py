@@ -1,10 +1,13 @@
 import os
+import time
 import secrets
 import logging
+from collections import defaultdict
 from django.utils import timezone
 from django.conf import settings
 from django.db import OperationalError, IntegrityError
 from django.db.models import Q
+from django.contrib.auth.hashers import make_password, check_password
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -15,6 +18,46 @@ from .serializers import format_message_dict, format_user_dict
 from .bot_service import TelegramBotGateway
 
 logger = logging.getLogger(__name__)
+
+# Blue Team Defense: In-memory sliding rate limiter for authentication
+_LOGIN_ATTEMPTS = defaultdict(list)
+_MAX_LOGIN_ATTEMPTS = 15
+_LOGIN_WINDOW_SEC = 60
+
+ALLOWED_UPLOAD_EXTENSIONS = {
+    '.jpg', '.jpeg', '.png', '.gif', '.webp',
+    '.webm', '.mp3', '.ogg', '.wav', '.mp4',
+    '.pdf', '.txt', '.doc', '.docx'
+}
+MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+def _is_rate_limited(ip: str) -> bool:
+    now = time.time()
+    valid_attempts = [t for t in _LOGIN_ATTEMPTS[ip] if now - t < _LOGIN_WINDOW_SEC]
+    _LOGIN_ATTEMPTS[ip] = valid_attempts
+    return len(valid_attempts) >= _MAX_LOGIN_ATTEMPTS
+
+
+def _record_failed_attempt(ip: str):
+    _LOGIN_ATTEMPTS[ip].append(time.time())
+
+
+def _clear_attempts(ip: str):
+    _LOGIN_ATTEMPTS.pop(ip, None)
+
+
+def _verify_and_upgrade_password(account, input_pass: str) -> bool:
+    if not account or not input_pass:
+        return False
+    if account.password.startswith(('pbkdf2_', 'argon2', 'bcrypt')):
+        return check_password(input_pass, account.password)
+    if account.password == input_pass:
+        account.password = make_password(input_pass)
+        account.save(update_fields=['password'])
+        return True
+    return False
+
 
 
 @api_view(['GET'])
@@ -69,12 +112,25 @@ def login_view(request):
     user_id_str = str(user_id).strip()
     password_str = str(password)
 
-    # 1. Authenticate against EmployeeAccount
+    # 1. Extract Network & Device Metadata
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip_address = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip_address = request.META.get('REMOTE_ADDR', '127.0.0.1')
+
+    if _is_rate_limited(ip_address):
+        logger.warning(f"[Login View] Rate limit exceeded for IP: {ip_address}")
+        return Response({'detail': 'Too many login attempts. Please wait 1 minute.'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+    # 2. Authenticate against EmployeeAccount
     employee = EmployeeAccount.objects.filter(user_id=user_id_str).first()
     bot_account = BotAccount.objects.filter(user_id=user_id_str).first()
 
     if employee:
-        if employee.password != password_str:
+        if not _verify_and_upgrade_password(employee, password_str):
+            _record_failed_attempt(ip_address)
             return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         if not employee.is_active:
             return Response({'detail': 'Account is inactive'}, status=status.HTTP_403_FORBIDDEN)
@@ -84,12 +140,13 @@ def login_view(request):
             bot_account.save(update_fields=['employee'])
     elif bot_account:
         # Fallback to BotAccount and auto-create EmployeeAccount
-        if bot_account.password != password_str:
+        if not _verify_and_upgrade_password(bot_account, password_str):
+            _record_failed_attempt(ip_address)
             return Response({'detail': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         employee = EmployeeAccount.objects.create(
             user_id=bot_account.user_id,
             username=bot_account.bot_name or "Operator",
-            password=bot_account.password,
+            password=make_password(password_str),
             avatar=bot_account.avatar or "",
             role="operator",
             is_active=True
@@ -97,15 +154,10 @@ def login_view(request):
         bot_account.employee = employee
         bot_account.save(update_fields=['employee'])
     else:
+        _record_failed_attempt(ip_address)
         return Response({'detail': 'Operator account not found'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # 2. Extract Device & Network Metadata
-    user_agent = request.META.get('HTTP_USER_AGENT', '')
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip_address = x_forwarded_for.split(',')[0].strip()
-    else:
-        ip_address = request.META.get('REMOTE_ADDR')
+    _clear_attempts(ip_address)
 
     if not device_name:
         ua_lower = user_agent.lower()
@@ -534,16 +586,26 @@ def sync_telegram_view(request):
 @permission_classes([AllowAny])
 def media_upload(request):
     """
-    Handle audio voice notes, photo, and media uploads from React client.
+    Handle audio voice notes, photo, and media uploads from React client with validation.
     """
     file_obj = request.FILES.get('file')
     if not file_obj:
         return Response({'detail': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
 
+    if file_obj.size > MAX_FILE_SIZE:
+        return Response({'detail': f'File exceeds maximum size limit ({MAX_FILE_SIZE // (1024 * 1024)}MB)'}, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_name = os.path.basename(file_obj.name)
+    _, ext = os.path.splitext(raw_name)
+    ext_lower = ext.lower()
+    if ext_lower not in ALLOWED_UPLOAD_EXTENSIONS:
+        return Response({'detail': f'File extension {ext_lower} is not allowed'}, status=status.HTTP_400_BAD_REQUEST)
+
+    safe_name = "".join(c for c in raw_name if c.isalnum() or c in "._-")
     upload_dir = settings.MEDIA_ROOT / 'uploads'
     os.makedirs(upload_dir, exist_ok=True)
 
-    filename = f"{secrets.token_hex(8)}_{file_obj.name}"
+    filename = f"{secrets.token_hex(8)}_{safe_name}"
     file_path = upload_dir / filename
 
     with open(file_path, 'wb+') as destination:
@@ -566,6 +628,13 @@ def telegram_webhook(request, user_id=None):
     When a customer messages the bot, Telegram POSTs the JSON payload here.
     Supports /api/telegram/webhook/<user_id>/ and /api/telegram/webhook/.
     """
+    webhook_secret = getattr(settings, 'TELEGRAM_WEBHOOK_SECRET', None) or os.environ.get('TELEGRAM_WEBHOOK_SECRET')
+    if webhook_secret:
+        received_token = request.headers.get('X-Telegram-Bot-Api-Secret-Token') or request.META.get('HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN')
+        if not received_token or not secrets.compare_digest(received_token, webhook_secret):
+            logger.warning("[Telegram Webhook] Unauthorized webhook update: token mismatch or absent")
+            return Response({"detail": "Unauthorized webhook source"}, status=status.HTTP_403_FORBIDDEN)
+
     operator_id = (
         user_id or
         request.META.get('HTTP_USER_ID') or

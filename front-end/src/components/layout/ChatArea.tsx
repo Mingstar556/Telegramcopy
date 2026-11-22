@@ -1,10 +1,11 @@
-import React from 'react';
-import { ArrowLeft, MoreVertical, Search, Bot } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, MoreVertical, Search, Bot, Sparkles } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Avatar } from '../common/Avatar';
 import { ChatBar } from '../chat/ChatBar';
 import { MessageList } from '../chat/MessageList';
+import { ChatSummaryModal } from '../chat/ChatSummaryModal';
 
 interface ChatAreaProps {
   onBackToSidebar: () => void;
@@ -13,6 +14,7 @@ interface ChatAreaProps {
 export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
   const { activeChat } = useChat();
   const { theme, settings } = useTheme();
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
   const isGold = theme === 'black-gold';
 
@@ -78,7 +80,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
           </div>
 
           {/* Right Header Actions */}
-          <div className="flex items-center gap-1 text-[var(--color-text-muted)]">
+          <div className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+            <button
+              onClick={() => setIsSummaryOpen(true)}
+              className={`px-2.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition btn-press ${
+                isGold
+                  ? 'bg-[#d4af37]/10 border-[#d4af37]/30 text-[#f3c853] hover:bg-[#d4af37]/20'
+                  : 'bg-white/5 border-white/10 text-blue-400 hover:bg-white/10'
+              }`}
+              title="Summarize Conversation"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Summarize</span>
+            </button>
             <button
               className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/5 hover:text-white transition btn-press"
               title="Search"
@@ -110,6 +124,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
 
       {/* Bottom Composer */}
       {activeChat && <ChatBar />}
+
+      {/* AI Chat Summary Modal */}
+      <ChatSummaryModal
+        isOpen={isSummaryOpen}
+        onClose={() => setIsSummaryOpen(false)}
+      />
     </main>
   );
 };

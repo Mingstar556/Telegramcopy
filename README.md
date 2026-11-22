@@ -2,6 +2,8 @@
 
 A self-hosted, multi-device web chat platform connecting directly to company Telegram bots. Employees log in to the web interface as dedicated bots, auto-sync conversations in real time, and chat directly with company clients on Telegram.
 
+> 🤖 **Working with an AI Coding Assistant?** Please consult [AI_README.md](file:///c:/Users/linda/Documents/project/Telegramplugin-front/AI_README.md) for full architectural guidelines, component boundaries, and strict non-regression rules.
+
 ---
 
 ## ⚡ 1-Click Fast Host (Backend + Frontend + Database)
@@ -35,6 +37,19 @@ The application is completely packaged into a self-contained folder ready to run
   - Allows editing the server host URL (e.g. `http://192.168.x.x:8000`) on the fly.
 - **`START_SERVER.bat`**: One-click script to start the local backend server & database host.
 - **`config.json`**: Easily configure the remote or local API/WebSocket endpoint.
+
+---
+
+## ✨ AI Conversation Summarizer & Security Layer
+
+- **AI Chat Summary**: Click the **Summarize** button (`Sparkles` icon) in any active chat header to generate an instant executive summary of the client's questions, discussion points, and resolution status, with 1-click **Copy** or **Post as Note** into your private Saved Messages room.
+- **Enterprise Security Hardening**:
+  - Transparent PBKDF2 password hashing & auto-upgrade (`_verify_and_upgrade_password`)
+  - Media upload sanitization with strict extension whitelist & 25MB limit
+  - Telegram Webhook secret token validation (`X-Telegram-Bot-Api-Secret-Token`)
+  - Login brute-force sliding rate-limiter (15 attempts/60s returning HTTP 429)
+  - PyWebView local path traversal protection
+  - Untracked database and environment credentials from git
 
 ---
 

@@ -20,6 +20,12 @@ Key capabilities:
 - Two-way messaging: when an employee sends a message via the web UI, it is delivered 
   instantly to the client on Telegram; when the client replies on Telegram, the web 
   app receives it via real-time WebSocket.
+- AI Chat & Conversation Summarizer: instant dialogue synthesis in the chat header 
+  providing executive bullet points, customer inquiry summaries, message metrics, and 
+  one-click export to private Saved Messages notes.
+- Multi-Layer Security Hardening: PBKDF2 password hashing with auto-migration, media 
+  upload whitelisting (25MB ceiling), Telegram webhook secret token validation, 
+  login brute-force rate-limiting, and local desktop path traversal containment.
 - Pure 1-on-1 customer service focus: group creation features have been removed to 
   keep the interface focused, lightweight, and clean.
 

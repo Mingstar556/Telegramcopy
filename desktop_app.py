@@ -69,10 +69,13 @@ class AppRequestHandler(SimpleHTTPRequestHandler):
     config = {}
 
     def translate_path(self, path):
-        # Serve from dist_dir
+        # Serve from dist_dir securely; prevent path traversal
         path_clean = path.split('?', 1)[0].split('#', 1)[0]
-        rel_path = path_clean.lstrip('/')
-        full_path = os.path.join(self.dist_dir, rel_path)
+        rel_path = os.path.normpath(path_clean.lstrip('/\\'))
+        full_path = os.path.abspath(os.path.join(self.dist_dir, rel_path))
+        base_dir = os.path.abspath(self.dist_dir)
+        if not full_path.startswith(base_dir):
+            return os.path.join(self.dist_dir, 'index.html')
         return full_path
 
     def do_GET(self):
