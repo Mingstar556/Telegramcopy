@@ -1,4 +1,4 @@
-import { BotAccount, LoginCredentials } from '../types/auth';
+import { BotAccount, LoginCredentials, GenerateAccountsPayload, GenerateAccountsResponse, GeneratedAccount } from '../types/auth';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload } from '../types/chat';
 import { INITIAL_MOCK_CONVERSATIONS, INITIAL_MOCK_MESSAGES, MOCK_BOT_USER } from './mockData';
 
@@ -38,6 +38,23 @@ export function getWsBaseUrl(): string {
     }
   }
   return import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8000/ws/chat/';
+}
+
+export function resolveMediaUrl(url?: string): string {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('data:')
+  ) {
+    return trimmed;
+  }
+  const base = getApiBaseUrl().replace(/\/+$/, '');
+  const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return `${base}${path}`;
 }
 
 export interface HealthCheckResult {
@@ -169,7 +186,7 @@ class ApiService {
         userId: data["User-ID"] || creds.userId,
         botName: data.bot_name || data.name || 'Telegram Bot',
         botUsername: data.bot_username || data.username || 'bot',
-        avatar: data.avatar,
+        avatar: resolveMediaUrl(data.avatar),
         description: data.description,
         assignedToken: data.token,
         connectedAt: new Date().toLocaleTimeString()
@@ -207,7 +224,7 @@ class ApiService {
       userId: data["User-ID"] || userId,
       botName: data.bot_name || 'Telegram Bot',
       botUsername: data.bot_username || 'bot',
-      avatar: data.avatar,
+      avatar: resolveMediaUrl(data.avatar),
       description: data.description,
       connectedAt: data.connected_at
     };
@@ -234,7 +251,22 @@ class ApiService {
       throw new Error('Failed to retrieve chat conversations');
     }
 
-    return await res.json();
+    const rawConvs = await res.json();
+    return (rawConvs || []).map((conv: ChatConversation) => ({
+      ...conv,
+      user: {
+        ...conv.user,
+        avatar: resolveMediaUrl(conv.user.avatar)
+      },
+      lastMessage: conv.lastMessage ? {
+        ...conv.lastMessage,
+        senderAvatar: resolveMediaUrl(conv.lastMessage.senderAvatar),
+        media: conv.lastMessage.media ? {
+          ...conv.lastMessage.media,
+          url: resolveMediaUrl(conv.lastMessage.media.url)
+        } : undefined
+      } : undefined
+    }));
   }
 
   /**
@@ -258,7 +290,15 @@ class ApiService {
       throw new Error('Failed to fetch chat history');
     }
 
-    return await res.json();
+    const rawMsgs = await res.json();
+    return (rawMsgs || []).map((msg: ChatMessage) => ({
+      ...msg,
+      senderAvatar: resolveMediaUrl(msg.senderAvatar),
+      media: msg.media ? {
+        ...msg.media,
+        url: resolveMediaUrl(msg.media.url)
+      } : undefined
+    }));
   }
 
   /**
@@ -388,6 +428,111 @@ class ApiService {
 
     const data = await res.json();
     return { success: true, messageId: data.message_id || data.id };
+  }
+
+  /**
+   * Automatic Telegram Bot Account Generator
+   * Generates web operator accounts from Telegram bot keys
+   */
+  async generateBotAccounts(payload: GenerateAccountsPayload): Promise<GenerateAccountsResponse> {
+    if (this.useMock) {
+      await new Promise(r => setTimeout(r, 700));
+      const tokens = payload.tokens && payload.tokens.length > 0 
+        ? payload.tokens 
+        : Array.from({ length: payload.count || 1 }, (_, i) => `919739791${i}:AAHC1HOhNvV-exC9uzRBsHZ6BJbmTFEoXyo`);
+
+      const accounts: GeneratedAccount[] = tokens.map((tok, idx) => {
+        const botId = tok.split(':')[0] || `${idx + 1}`;
+        const uId = payload.idPrefix && payload.idPrefix !== 'auto'
+          ? `${payload.idPrefix}_${idx + 1}`
+          : `operator_${botId}`;
+        const pass = payload.passwordType === 'custom' && payload.customPassword
+          ? payload.customPassword
+          : `BotPass_${Math.floor(1000 + Math.random() * 9000)}`;
+
+        return {
+          userId: uId,
+          password: pass,
+          botName: `Customer Bot ${idx + 1}`,
+          botUsername: `bot_${botId}`,
+          botToken: tok,
+          botTokenMasked: `${tok.slice(0, 4)}...${tok.slice(-4)}`,
+          status: 'created',
+          telegramVerified: true,
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+        };
+      });
+
+      return {
+        status: 'success',
+        message: `Successfully generated ${accounts.length} web operator accounts.`,
+        totalRequested: tokens.length,
+        totalGenerated: accounts.length,
+        accounts
+      };
+    }
+
+    const base = this.getBaseUrl();
+    const res = await fetch(`${base}/api/admin/generate-accounts/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tokens: payload.tokens,
+        count: payload.count,
+        id_prefix: payload.idPrefix,
+        password_type: payload.passwordType,
+        custom_password: payload.customPassword,
+        fetch_telegram_info: payload.fetchTelegramInfo ?? true,
+        overwrite: payload.overwrite ?? true
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.detail || `Server returned error ${res.status}`);
+    }
+
+    const data = await res.json();
+    return {
+      status: data.status,
+      message: data.message,
+      totalRequested: data.total_requested,
+      totalGenerated: data.total_generated,
+      accounts: (data.accounts || []).map((a: any) => ({
+        userId: a.user_id,
+        password: a.password,
+        botName: a.bot_name,
+        botUsername: a.bot_username,
+        botToken: a.bot_token,
+        botTokenMasked: a.bot_token_masked,
+        avatar: a.avatar,
+        status: a.status,
+        telegramVerified: a.telegram_verified,
+        telegramError: a.telegram_error
+      })),
+      errors: data.errors
+    };
+  }
+
+  async listBotAccounts(): Promise<GeneratedAccount[]> {
+    if (this.useMock) {
+      return [];
+    }
+    const base = this.getBaseUrl();
+    const res = await fetch(`${base}/api/admin/bot-accounts/`);
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return (data.accounts || []).map((a: any) => ({
+      userId: a.user_id,
+      password: '***',
+      botName: a.bot_name,
+      botUsername: a.bot_username,
+      botToken: a.bot_token_masked,
+      botTokenMasked: a.bot_token_masked,
+      avatar: a.avatar,
+      status: a.is_active ? 'created' : 'updated',
+      telegramVerified: true
+    }));
   }
 }
 

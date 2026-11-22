@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNotification, AppNotification } from '../../contexts/NotificationContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { MessageSquare, CheckCircle2, AlertCircle, Info, X, ExternalLink } from 'lucide-react';
+import { MessageSquare, CheckCircle2, AlertCircle, Info, X, ExternalLink, RotateCcw } from 'lucide-react';
 
 export const NotificationToastContainer: React.FC = () => {
   const { notifications, dismissNotification } = useNotification();
@@ -35,6 +35,7 @@ const NotificationToastItem: React.FC<NotificationToastItemProps> = ({
   theme
 }) => {
   const isGold = theme === 'black-gold';
+  const isUndo = notification.actionLabel?.toLowerCase() === 'undo';
 
   const getIcon = () => {
     switch (notification.type) {
@@ -49,10 +50,20 @@ const NotificationToastItem: React.FC<NotificationToastItemProps> = ({
     }
   };
 
+  const handleCardClick = () => {
+    if (notification.type === 'message' && notification.onAction) {
+      notification.onAction();
+      onDismiss();
+    }
+  };
+
   return (
     <div
       role="alert"
+      onClick={handleCardClick}
       className={`pointer-events-auto w-full max-w-sm sm:max-w-md rounded-2xl border backdrop-blur-xl p-3.5 shadow-2xl animate-notification-drop flex items-start gap-3 relative overflow-hidden transition-all duration-200 select-none ${
+        notification.type === 'message' && notification.onAction ? 'cursor-pointer hover:border-[var(--color-accent)]' : ''
+      } ${
         isGold
           ? 'bg-[#12110c]/95 border-[#e5b842]/40 text-[#f5f2eb] shadow-[0_10px_35px_rgba(229,184,66,0.18)]'
           : 'bg-[var(--color-bg-header)] border-[var(--color-border)] text-[var(--color-text-main)] shadow-[0_12px_40px_rgba(0,0,0,0.55)]'
@@ -91,21 +102,33 @@ const NotificationToastItem: React.FC<NotificationToastItemProps> = ({
         {/* Action Button if specified */}
         {notification.actionLabel && notification.onAction && (
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               notification.onAction?.();
               onDismiss();
             }}
-            className="mt-2 text-xs font-semibold text-[var(--color-accent)] hover:underline flex items-center gap-1 btn-press"
+            className={`mt-2 text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1.5 transition btn-press ${
+              isUndo
+                ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:opacity-90 shadow-md font-bold'
+                : 'bg-white/10 text-[var(--color-accent)] hover:bg-white/15'
+            }`}
           >
+            {isUndo ? (
+              <RotateCcw className="w-3.5 h-3.5 stroke-[2.5]" />
+            ) : (
+              <ExternalLink className="w-3 h-3" />
+            )}
             <span>{notification.actionLabel}</span>
-            <ExternalLink className="w-3 h-3" />
           </button>
         )}
       </div>
 
       {/* Close Button */}
       <button
-        onClick={onDismiss}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDismiss();
+        }}
         className="p-1 -mr-1 -mt-1 text-[var(--color-text-muted)] hover:text-white rounded-lg hover:bg-white/10 transition btn-press flex-shrink-0"
         title="Dismiss"
       >

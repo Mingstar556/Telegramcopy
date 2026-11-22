@@ -39,6 +39,9 @@ def format_message_dict(msg: ChatMessage) -> dict:
             'name': msg.sticker_id,
         }
 
+    if getattr(msg, 'reply_markup', None):
+        data['reply_markup'] = msg.reply_markup
+
     return data
 
 

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bookmark } from 'lucide-react';
+import { resolveMediaUrl } from '../../services/api';
 
 interface AvatarProps {
   id: string;
@@ -29,6 +30,13 @@ export const Avatar: React.FC<AvatarProps> = ({
   isSavedMessages,
   isGlow = false
 }) => {
+  const [hasError, setHasError] = useState(false);
+  const resolvedUrl = resolveMediaUrl(avatarUrl);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [avatarUrl]);
+
   const charCode = (id || name || 'A').charCodeAt(0);
   const gradient = MODERN_GRADIENTS[charCode % MODERN_GRADIENTS.length];
 
@@ -66,18 +74,19 @@ export const Avatar: React.FC<AvatarProps> = ({
     );
   }
 
+  const showImage = Boolean(resolvedUrl && !hasError);
+
   return (
     <div className="relative inline-block flex-shrink-0 select-none">
-      {avatarUrl ? (
+      {showImage ? (
         <img
-          src={avatarUrl}
+          src={resolvedUrl}
           alt={name}
+          loading="lazy"
           className={`${sizeClasses} rounded-full object-cover transition-all duration-300 ${
             isGlow ? 'unseen-avatar-ring' : 'ring-1 ring-white/10 shadow-sm'
           }`}
-          onError={(e) => {
-            (e.target as HTMLElement).style.display = 'none';
-          }}
+          onError={() => setHasError(true)}
         />
       ) : (
         <div

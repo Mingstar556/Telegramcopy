@@ -16,4 +16,7 @@ urlpatterns = [
     path('telegram/webhook/<str:user_id>/', views.telegram_webhook, name='telegram_webhook'),
     path('send_photo/', views.send_photo, name='send_photo'),
     re_path(r'^send_photo/?$', views.send_photo, name='send_photo_flexible'),
+    path('admin/generate-accounts/', views.generate_bot_accounts_view, name='generate_bot_accounts'),
+    path('admin/bot-accounts/', views.list_bot_accounts_view, name='list_bot_accounts'),
+    path('admin/bot-accounts/<str:user_id>/', views.delete_bot_account_view, name='delete_bot_account'),
 ]

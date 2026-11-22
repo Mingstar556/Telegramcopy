@@ -241,15 +241,34 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
             </span>
           </div>
 
-          {/* Subtitle & Last Message */}
+          {/* Subtitle & Last Message or Draft */}
           <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
             <div className="flex items-center gap-1.5 truncate pr-2">
-              <p className={`truncate leading-relaxed ${isUnseen ? 'text-zinc-200 font-medium' : ''}`}>
-                {chat.lastMessage?.isOutgoing && (
-                  <span className="text-[var(--color-accent)] font-medium mr-1">You:</span>
-                )}
-                {chat.lastMessage?.message || (chat.isSavedMessages ? 'Tap to view saved notes' : 'Tap to message')}
-              </p>
+              {chat.draft && !isActive ? (
+                <p className="truncate leading-relaxed">
+                  <span className="text-red-400 font-semibold mr-1">Draft:</span>
+                  <span className="text-zinc-300">{chat.draft}</span>
+                </p>
+              ) : (
+                <p className={`truncate leading-relaxed ${isUnseen ? 'text-zinc-200 font-medium' : ''}`}>
+                  {chat.lastMessage?.isOutgoing && (
+                    <span className="text-[var(--color-accent)] font-medium mr-1">You:</span>
+                  )}
+                  {chat.lastMessage?.sticker || chat.lastMessage?.action === 'send_sticker'
+                    ? '✨ Sticker'
+                    : chat.lastMessage?.album && chat.lastMessage.album.length > 0
+                    ? `📷 ${chat.lastMessage.album.length} Photos`
+                    : chat.lastMessage?.media?.type === 'photo'
+                    ? (chat.lastMessage.message && chat.lastMessage.message !== '[Photo]' ? `📷 ${chat.lastMessage.message}` : '📷 Photo')
+                    : chat.lastMessage?.media?.type === 'video'
+                    ? (chat.lastMessage.message && chat.lastMessage.message !== '[Video]' ? `📹 ${chat.lastMessage.message}` : '📹 Video')
+                    : chat.lastMessage?.media?.type === 'voice'
+                    ? '🎤 Voice message'
+                    : chat.lastMessage?.media?.type === 'file'
+                    ? `📎 ${chat.lastMessage.media.fileName || 'Document'}`
+                    : chat.lastMessage?.message || (chat.isSavedMessages ? 'Tap to view saved notes' : 'Tap to message')}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5 flex-shrink-0">

@@ -147,6 +147,9 @@ class ChatMessage(models.Model):
     sticker_pack = models.CharField(max_length=64, blank=True, null=True)
     sticker_emoji = models.CharField(max_length=16, blank=True, null=True)
 
+    # Inline Keyboard Buttons (reply_markup)
+    reply_markup = models.JSONField(blank=True, null=True, default=dict)
+
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

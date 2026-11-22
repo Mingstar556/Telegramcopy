@@ -1,7 +1,9 @@
 import os
+import re
 import time
 import secrets
 import logging
+import requests
 from collections import defaultdict
 from django.utils import timezone
 from django.conf import settings
@@ -203,11 +205,33 @@ def login_view(request):
     # Auto-fetch conversations upon login
     try:
         TelegramBotGateway.sync_bot_conversations(operator_id=employee.user_id)
+        from .poller import AutoPollerEngine
+        AutoPollerEngine.ensure_bot_polling(employee.user_id)
     except Exception as e:
         logger.warning(f"[Login View] Background auto-sync failed gracefully: {e}")
 
-    # 4. Resolve Bot Metadata
+    # 4. Resolve Bot Metadata & Auto-Fetch Bot Avatar if missing
     bot = bot_account or (employee.bot_accounts.first() if hasattr(employee, 'bot_accounts') else None)
+    if bot and bot.bot_token and (not bot.avatar or not employee.avatar):
+        try:
+            bot_avatar = TelegramBotGateway.fetch_and_cache_telegram_avatar(bot.bot_token, bot.user_id, is_bot=True)
+            if not bot_avatar:
+                me_res = requests.get(f"https://api.telegram.org/bot{bot.bot_token}/getMe", timeout=3).json()
+                if me_res.get('ok') and isinstance(me_res.get('result'), dict):
+                    me_id = str(me_res['result'].get('id', ''))
+                    if me_id:
+                        bot_avatar = TelegramBotGateway.fetch_and_cache_telegram_avatar(bot.bot_token, me_id, is_bot=True)
+            if bot_avatar:
+                bot.avatar = bot_avatar
+                bot.save(update_fields=['avatar'])
+                employee.avatar = bot_avatar
+                employee.save(update_fields=['avatar'])
+        except Exception as e:
+            logger.debug(f"[Login View] Bot avatar fetch: {e}")
+
+    raw_avatar = employee.avatar or (bot.avatar if bot else "") or ""
+    if raw_avatar and raw_avatar.startswith('/'):
+        raw_avatar = request.build_absolute_uri(raw_avatar)
 
     return Response({
         "status": "success",
@@ -217,7 +241,7 @@ def login_view(request):
         "employee_name": employee.username,
         "bot_name": bot.bot_name if bot else "Customer Service Bot",
         "bot_username": bot.bot_username if bot else "cs_support_bot",
-        "avatar": employee.avatar or (bot.avatar if bot else "") or "",
+        "avatar": raw_avatar,
         "description": bot.description if bot else "Customer service operator account",
     })
 
@@ -310,7 +334,7 @@ def active_sessions_view(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def user_profile(request):
-    """Fetch profile of current operator bot session."""
+    """Fetch profile of current operator bot session with Telegram avatar sync."""
     user_id = request.query_params.get('User-ID') or request.query_params.get('userId') or request.query_params.get('user_id')
     if not user_id:
         return Response({'detail': 'User-ID is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -322,12 +346,38 @@ def user_profile(request):
     if not bot and not emp:
         return Response({'detail': 'Operator not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Auto-fetch bot profile photo if missing
+    if bot and bot.bot_token and (not bot.avatar or not (emp and emp.avatar)):
+        try:
+            bot_avatar = TelegramBotGateway.fetch_and_cache_telegram_avatar(bot.bot_token, bot.user_id, is_bot=True)
+            if not bot_avatar and bot.bot_token:
+                try:
+                    me_res = requests.get(f"https://api.telegram.org/bot{bot.bot_token}/getMe", timeout=3).json()
+                    if me_res.get('ok') and isinstance(me_res.get('result'), dict):
+                        me_id = str(me_res['result'].get('id', ''))
+                        if me_id:
+                            bot_avatar = TelegramBotGateway.fetch_and_cache_telegram_avatar(bot.bot_token, me_id, is_bot=True)
+                except Exception:
+                    pass
+            if bot_avatar:
+                bot.avatar = bot_avatar
+                bot.save(update_fields=['avatar'])
+                if emp:
+                    emp.avatar = bot_avatar
+                    emp.save(update_fields=['avatar'])
+        except Exception as e:
+            logger.debug(f"[User Profile] Auto-avatar fetch for bot error: {e}")
+
+    raw_avatar = (emp.avatar if emp and emp.avatar else (bot.avatar if bot else "")) or ""
+    if raw_avatar and raw_avatar.startswith('/'):
+        raw_avatar = request.build_absolute_uri(raw_avatar)
+
     return Response({
         "User-ID": emp.user_id if emp else bot.user_id,
         "employee_name": emp.username if emp else "Operator",
         "bot_name": bot.bot_name if bot else "Customer Service Bot",
         "bot_username": bot.bot_username if bot else "cs_support_bot",
-        "avatar": (emp.avatar if emp and emp.avatar else (bot.avatar if bot else "")) or "",
+        "avatar": raw_avatar,
         "description": bot.description if bot else "Customer service operator account",
         "connected_at": timezone.now().strftime("%I:%M %p")
     })
@@ -407,22 +457,44 @@ def chats_list(request):
     }
     conversations.append(saved_conv)
 
-    for u in users:
-        # Get last message between operator and this user
-        last_msg = ChatMessage.objects.filter(
-            (Q(sender_id=operator_id) & Q(to_user=u.telegram_id)) |
-            (Q(sender_id=u.telegram_id) & Q(to_user=operator_id))
-        ).order_by('-created_at').first()
-
-        unread_count = ChatMessage.objects.filter(
-            sender_id=u.telegram_id,
+    # High-Performance Batch Aggregation (Eliminating N+1 queries):
+    from django.db.models import Count
+    unread_counts = dict(
+        ChatMessage.objects.filter(
             to_user=operator_id,
             status='delivered'
-        ).count()
+        ).values('sender_id').annotate(cnt=Count('id')).values_list('sender_id', 'cnt')
+    )
+
+    # Batch fetch all recent messages for interacted users in a single indexed query
+    recent_msgs = ChatMessage.objects.filter(
+        Q(sender_id=operator_id, to_user__in=interacted_user_ids) |
+        Q(to_user=operator_id, sender_id__in=interacted_user_ids)
+    ).order_by('-created_at')
+
+    last_msg_map = {}
+    for m in recent_msgs:
+        peer_id = m.to_user if m.sender_id == operator_id else m.sender_id
+        if peer_id not in last_msg_map:
+            last_msg_map[peer_id] = m
+
+    bot_token = TelegramBotGateway.get_bot_token(operator_id)
+
+    for u in users:
+        # If user avatar is missing, trigger async background fetch without blocking HTTP request
+        if not u.avatar and bot_token:
+            TelegramBotGateway.async_fetch_and_cache_avatar(bot_token, u.telegram_id)
+
+        u_dict = format_user_dict(u)
+        if u_dict.get('avatar') and u_dict['avatar'].startswith('/'):
+            u_dict['avatar'] = request.build_absolute_uri(u_dict['avatar'])
+
+        last_msg = last_msg_map.get(u.telegram_id)
+        unread_count = unread_counts.get(u.telegram_id, 0)
 
         conv = {
             'id': u.telegram_id,
-            'user': format_user_dict(u),
+            'user': u_dict,
             'unreadCount': unread_count,
             'lastMessage': format_message_dict(last_msg) if last_msg else None,
             'isPinned': False,
@@ -431,7 +503,10 @@ def chats_list(request):
         }
         conversations.append(conv)
 
-    return Response(conversations)
+    saved_convs = [c for c in conversations if c.get('isSavedMessages') or c.get('isPinned')]
+    other_convs = [c for c in conversations if not (c.get('isSavedMessages') or c.get('isPinned'))]
+    other_convs.sort(key=lambda c: (c.get('lastMessage') or {}).get('timestamp', 0) if c.get('lastMessage') else 0, reverse=True)
+    return Response(saved_convs + other_convs)
 
 
 @api_view(['GET'])
@@ -467,7 +542,20 @@ def messages_history(request):
         (Q(sender_id=to_user) & Q(to_user=operator_id))
     ).order_by('created_at')
 
-    data = [format_message_dict(m) for m in messages]
+    target_user = TelegramUser.objects.filter(telegram_id=to_user).first()
+    target_avatar = target_user.avatar if target_user else ''
+    if target_avatar and target_avatar.startswith('/'):
+        target_avatar = request.build_absolute_uri(target_avatar)
+
+    data = []
+    for m in messages:
+        m_dict = format_message_dict(m)
+        if not m.is_outgoing and target_avatar:
+            m_dict['senderAvatar'] = target_avatar
+        if m_dict.get('media') and m_dict['media'].get('url') and m_dict['media']['url'].startswith('/'):
+            m_dict['media']['url'] = request.build_absolute_uri(m_dict['media']['url'])
+        data.append(m_dict)
+
     return Response(data)
 
 
@@ -526,6 +614,17 @@ def send_message(request):
     if not is_safe:
         return Response({'detail': sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
+    reply_markup = request.data.get('reply_markup')
+    if reply_markup and isinstance(reply_markup, dict):
+        inline_kb = reply_markup.get('inline_keyboard', [])
+        for row in inline_kb:
+            if isinstance(row, list):
+                for btn in row:
+                    if isinstance(btn, dict) and btn.get('url'):
+                        is_safe_btn, sec_err_btn = SecurityGuard.validate_outgoing_message(str(btn['url']), operator_id, request.META.get('REMOTE_ADDR'))
+                        if not is_safe_btn:
+                            return Response({'detail': f"Inline button URL blocked: {sec_err_btn}"}, status=status.HTTP_400_BAD_REQUEST)
+
     # 2. Fetch Operator & Bot Token
     bot_token = TelegramBotGateway.get_bot_token(operator_id)
 
@@ -546,17 +645,21 @@ def send_message(request):
         sticker_id=sticker.get('id') if isinstance(sticker, dict) else None,
         sticker_pack=sticker.get('packId') if isinstance(sticker, dict) else None,
         sticker_emoji=sticker.get('emoji') if isinstance(sticker, dict) else None,
+        reply_markup=reply_markup,
     )
 
     # 3. Dispatch to Telegram Bot API (if not saving to private Saved Messages)
     tg_response = None
     if to_user != 'saved_messages':
-        tg_response = TelegramBotGateway.send_telegram_message(
+        tg_response = TelegramBotGateway.dispatch_to_telegram_async(
             bot_token=bot_token,
             chat_id=to_user,
             text=text,
             media=media,
-            sticker=sticker
+            sticker=sticker,
+            operator_id=operator_id,
+            msg_uid=msg_uid,
+            reply_markup=reply_markup
         )
 
     # 4. Broadcast to operator's WebSocket channel
@@ -575,6 +678,8 @@ def send_message(request):
         ws_event["media"] = media
     if isinstance(sticker, dict):
         ws_event["sticker"] = sticker
+    if reply_markup:
+        ws_event["reply_markup"] = reply_markup
 
     TelegramBotGateway.notify_operator_via_websocket(operator_id, ws_event)
 
@@ -970,11 +1075,14 @@ def send_photo(request):
                 'url': media_url,
                 'fileName': media_filename
             }
-            tg_response = TelegramBotGateway.send_telegram_message(
+            tg_response = TelegramBotGateway.dispatch_to_telegram_async(
                 bot_token=bot_token,
                 chat_id=to_userid,
                 text=caption or "",
-                media=media_dict
+                media=media_dict,
+                action='send_photo',
+                operator_id=employee_id,
+                msg_uid=msg_uid
             )
 
         # 6. Real-time WebSocket broadcast to operator
@@ -1035,3 +1143,233 @@ def send_photo(request):
         "caption": results[-1]["caption"],
         "action": results[-1]["action"],
     }, status=status.HTTP_200_OK)
+
+
+# ==============================================================================
+# AUTOMATIC TELEGRAM BOT ACCOUNT GENERATOR (ADMIN TOOL)
+# ==============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def generate_bot_accounts_view(request):
+    """
+    Automatic Bot Account Generator Endpoint.
+    Accepts Telegram Bot keys/tokens, verifies each against Telegram Bot API (getMe),
+    generates secure web login credentials (User-ID & Password), and creates both
+    EmployeeAccount and BotAccount records in the SQLite database.
+    """
+    data = request.data if isinstance(request.data, dict) else {}
+    raw_tokens = data.get('tokens') or data.get('bot_tokens') or data.get('keys') or []
+    count_requested = data.get('count')
+    id_prefix = str(data.get('id_prefix', 'auto')).strip()
+    password_type = str(data.get('password_type', 'memorable')).lower().strip()
+    custom_password = str(data.get('custom_password', '')).strip()
+    fetch_telegram_info = bool(data.get('fetch_telegram_info', True))
+    overwrite = bool(data.get('overwrite', True))
+
+    token_list = []
+    if isinstance(raw_tokens, str):
+        # Support multi-line string or comma-separated tokens
+        lines = re.split(r'[\r\n,]+', raw_tokens)
+        for line in lines:
+            t = line.strip()
+            if t:
+                token_list.append(t)
+    elif isinstance(raw_tokens, list):
+        for item in raw_tokens:
+            if isinstance(item, str):
+                t = item.strip()
+                if t:
+                    token_list.append(t)
+            elif isinstance(item, dict) and 'token' in item:
+                t = str(item['token']).strip()
+                if t:
+                    token_list.append(t)
+
+    # If count is specified and more than tokens provided, pad or generate placeholders
+    if count_requested and isinstance(count_requested, (int, str)):
+        try:
+            target_count = int(count_requested)
+            if target_count > len(token_list):
+                # Admin specified count greater than provided tokens
+                needed = target_count - len(token_list)
+                for i in range(needed):
+                    dummy_bot_id = secrets.randbelow(899999999) + 100000000
+                    dummy_token = f"{dummy_bot_id}:AA{secrets.token_urlsafe(28)[:32]}"
+                    token_list.append(dummy_token)
+        except ValueError:
+            pass
+
+    if not token_list:
+        return Response({
+            "status": "error",
+            "message": "No Telegram bot keys provided. Please provide 'tokens' or 'count'."
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    generated_accounts = []
+    errors = []
+
+    for index, token in enumerate(token_list, start=1):
+        bot_id = ""
+        if ":" in token:
+            parts = token.split(":", 1)
+            if parts[0].isdigit():
+                bot_id = parts[0]
+
+        bot_name = f"Bot {bot_id or index}"
+        bot_username = f"bot_{bot_id or index}"
+        avatar_url = ""
+        telegram_verified = False
+        telegram_error = ""
+
+        # 1. Probe Telegram Bot API for real identity
+        if fetch_telegram_info and bot_id:
+            try:
+                get_me_url = f"https://api.telegram.org/bot{token}/getMe"
+                resp = requests.get(get_me_url, timeout=5)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    if res_json.get('ok') and isinstance(res_json.get('result'), dict):
+                        b_res = res_json['result']
+                        bot_name = b_res.get('first_name') or bot_name
+                        bot_username = b_res.get('username') or bot_username
+                        telegram_verified = True
+
+                        # Try to fetch avatar
+                        try:
+                            photos_url = f"https://api.telegram.org/bot{token}/getUserProfilePhotos?user_id={bot_id}&limit=1"
+                            p_resp = requests.get(photos_url, timeout=4)
+                            if p_resp.status_code == 200:
+                                p_json = p_resp.json()
+                                if p_json.get('ok') and p_json.get('result', {}).get('photos'):
+                                    photo_items = p_json['result']['photos'][0]
+                                    if photo_items:
+                                        file_id = photo_items[-1].get('file_id')
+                                        if file_id:
+                                            f_resp = requests.get(f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}", timeout=4)
+                                            if f_resp.status_code == 200 and f_resp.json().get('ok'):
+                                                file_path = f_resp.json()['result'].get('file_path')
+                                                if file_path:
+                                                    avatar_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                        except Exception as e:
+                            logger.debug(f"[Generator] Avatar fetch skipped: {e}")
+                else:
+                    telegram_error = f"Telegram HTTP {resp.status_code}: {resp.text[:80]}"
+            except Exception as e:
+                telegram_error = f"Telegram API unreachable: {str(e)[:80]}"
+
+        # 2. Determine unique User-ID
+        if id_prefix == "auto":
+            candidate_id = re.sub(r'[^a-zA-Z0-9_]', '', bot_username.lower()) or f"bot_{bot_id or index}"
+        elif id_prefix.endswith("_") or id_prefix.endswith("-"):
+            candidate_id = f"{id_prefix}{index}"
+        else:
+            candidate_id = f"{id_prefix}_{index}"
+
+        # Ensure User-ID uniqueness if not overwriting
+        user_id = candidate_id
+        suffix_num = 1
+        while not overwrite and EmployeeAccount.objects.filter(user_id=user_id).exists():
+            user_id = f"{candidate_id}_{suffix_num}"
+            suffix_num += 1
+
+        # 3. Generate Password
+        if password_type == "custom" and custom_password:
+            raw_password = custom_password
+        elif password_type == "random":
+            raw_password = secrets.token_urlsafe(9)
+        else: # memorable default
+            random_digits = secrets.randbelow(9000) + 1000
+            raw_password = f"BotPass_{random_digits}"
+
+        password_hash = make_password(raw_password)
+
+        # 4. Upsert EmployeeAccount & BotAccount in SQLite
+        emp, emp_created = EmployeeAccount.objects.update_or_create(
+            user_id=user_id,
+            defaults={
+                'username': bot_name,
+                'password': password_hash,
+                'avatar': avatar_url or "",
+                'role': 'operator',
+                'is_active': True
+            }
+        )
+
+        bot_acc, bot_created = BotAccount.objects.update_or_create(
+            user_id=user_id,
+            defaults={
+                'employee': emp,
+                'password': password_hash,
+                'bot_name': bot_name,
+                'bot_username': bot_username,
+                'bot_token': token,
+                'avatar': avatar_url or "",
+                'description': f"Automated Web Operator linked to Telegram @{bot_username}"
+            }
+        )
+
+        generated_accounts.append({
+            "user_id": user_id,
+            "password": raw_password,
+            "bot_name": bot_name,
+            "bot_username": bot_username,
+            "bot_token": token,
+            "bot_token_masked": mask_sensitive_token(token),
+            "avatar": avatar_url,
+            "status": "created" if emp_created else "updated",
+            "telegram_verified": telegram_verified,
+            "telegram_error": telegram_error or None
+        })
+
+    return Response({
+        "status": "success",
+        "message": f"Successfully generated {len(generated_accounts)} web operator accounts.",
+        "total_requested": len(token_list),
+        "total_generated": len(generated_accounts),
+        "accounts": generated_accounts,
+        "errors": errors if errors else None
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_bot_accounts_view(request):
+    """
+    List all configured bot accounts and employee operators.
+    """
+    bots = BotAccount.objects.select_related('employee').all().order_by('-created_at')
+    results = []
+    for b in bots:
+        results.append({
+            "user_id": b.user_id,
+            "bot_name": b.bot_name,
+            "bot_username": b.bot_username,
+            "bot_token_masked": mask_sensitive_token(b.bot_token),
+            "avatar": b.avatar or "",
+            "is_active": b.employee.is_active if b.employee else True,
+            "created_at": b.created_at.isoformat() if b.created_at else None
+        })
+    return Response({
+        "status": "ok",
+        "count": len(results),
+        "accounts": results
+    })
+
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def delete_bot_account_view(request, user_id):
+    """
+    Remove a bot operator account and associated sessions.
+    """
+    user_id_str = str(user_id).strip()
+    deleted_bot = BotAccount.objects.filter(user_id=user_id_str).delete()
+    deleted_emp = EmployeeAccount.objects.filter(user_id=user_id_str).delete()
+
+    return Response({
+        "status": "success",
+        "user_id": user_id_str,
+        "deleted": bool(deleted_bot[0] or deleted_emp[0])
+    })
+

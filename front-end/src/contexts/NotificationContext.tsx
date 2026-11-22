@@ -16,6 +16,7 @@ interface NotificationContextValue {
   notifications: AppNotification[];
   notify: (notification: Omit<AppNotification, 'id'>) => string;
   dismissNotification: (id: string) => void;
+  dismissByChatId: (chatId: string) => void;
 }
 
 const NotificationContext = createContext<NotificationContextValue | undefined>(undefined);
@@ -25,6 +26,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const dismissNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  const dismissByChatId = useCallback((chatId: string) => {
+    if (!chatId) return;
+    setNotifications((prev) => prev.filter((n) => n.chatId !== chatId));
   }, []);
 
   const notify = useCallback(
@@ -50,7 +56,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   );
 
   return (
-    <NotificationContext.Provider value={{ notifications, notify, dismissNotification }}>
+    <NotificationContext.Provider value={{ notifications, notify, dismissNotification, dismissByChatId }}>
       {children}
     </NotificationContext.Provider>
   );

@@ -416,6 +416,16 @@ input:focus {
    ========================================================================== */
 
 /* Modern (Default) */
+.chat-bubble {
+  font-size: var(--tg-chat-font-size, 15px);
+  font-family: var(--tg-chat-font-family);
+}
+
+.chat-bubble p,
+.chat-bubble .leading-relaxed {
+  font-size: inherit;
+}
+
 [data-bubble-style="modern"] .chat-bubble {
   border-radius: 1.25rem;
 }

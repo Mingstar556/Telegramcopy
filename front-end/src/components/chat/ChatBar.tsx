@@ -1,20 +1,37 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check } from 'lucide-react';
+import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check, Bot } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import { audioRecorder } from '../../services/audioRecorder';
+import { audioRecorder, createDemoAudioVoice } from '../../services/audioRecorder';
 import { MediaAttachmentModal } from './MediaAttachmentModal';
+import { MediaPreviewModal, PendingMediaItem } from './MediaPreviewModal';
 import { StickerPicker } from './StickerPicker';
+import { BotCommandsMenu } from './BotCommandsMenu';
+import { StickerItem } from '../../types/chat';
 
 export const ChatBar: React.FC = () => {
-  const { sendMessage, sendMedia, activeChat } = useChat();
+  const {
+    sendMessage,
+    sendMedia,
+    sendAlbum,
+    sendSticker,
+    activeChat,
+    setDraft,
+    getDraft,
+    openCreateInlineButton
+  } = useChat();
   const { theme, settings } = useTheme();
   const { notify } = useNotification();
 
   const [text, setText] = useState('');
   const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false);
   const [isAttachmentOpen, setIsAttachmentOpen] = useState(false);
+  const [isBotMenuOpen, setIsBotMenuOpen] = useState(false);
+
+  // Media preview stage modal
+  const [previewItems, setPreviewItems] = useState<PendingMediaItem[]>([]);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -23,6 +40,20 @@ export const ChatBar: React.FC = () => {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isGold = theme === 'black-gold';
+
+  // Load existing draft when activeChat changes
+  useEffect(() => {
+    if (activeChat) {
+      const savedDraft = getDraft(activeChat.id);
+      setText(savedDraft);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        if (savedDraft.includes('\n')) {
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 110)}px`;
+        }
+      }
+    }
+  }, [activeChat?.id]);
 
   useEffect(() => {
     return () => {
@@ -36,6 +67,7 @@ export const ChatBar: React.FC = () => {
     if (!text.trim()) return;
     const toSend = text;
     setText('');
+    setDraft(activeChat.id, '');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -50,23 +82,148 @@ export const ChatBar: React.FC = () => {
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
+    setDraft(activeChat.id, val);
+
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      // Only expand if multiple lines, capped cleanly at 110px
-      if (e.target.value.includes('\n') || textareaRef.current.scrollHeight > 40) {
+      if (val.includes('\n') || textareaRef.current.scrollHeight > 40) {
         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 110)}px`;
       }
     }
   };
 
+  // CLIPBOARD PASTE HANDLER (Copy & Paste Image / Video Support)
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const mediaFiles: { file: File; type: 'photo' | 'video' }[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile();
+        if (file) mediaFiles.push({ file, type: 'photo' });
+      } else if (item.type.indexOf('video') !== -1) {
+        const file = item.getAsFile();
+        if (file) mediaFiles.push({ file, type: 'video' });
+      }
+    }
+
+    if (mediaFiles.length > 0) {
+      e.preventDefault();
+      const pending: PendingMediaItem[] = mediaFiles.map(m => ({
+        file: m.file,
+        previewUrl: URL.createObjectURL(m.file),
+        type: m.type
+      }));
+      setPreviewItems(pending);
+      setIsPreviewOpen(true);
+      notify({
+        title: mediaFiles[0].type === 'video' ? 'Video Pasted' : 'Image Pasted',
+        message: 'Review your media and add a caption before sending',
+        type: 'info',
+        duration: 2500
+      });
+    }
+  };
+
   const handleSelectEmoji = (emoji: string) => {
-    setText(prev => prev + emoji);
+    const updated = text + emoji;
+    setText(updated);
+    setDraft(activeChat.id, updated);
     textareaRef.current?.focus();
   };
 
-  const handleSelectMedia = async (file: File, type: 'photo' | 'video') => {
-    await sendMedia(type, file);
+  const handleSelectSticker = async (sticker: StickerItem) => {
+    await sendSticker(sticker);
+  };
+
+  // Handle Photo(s) chosen from attachment modal
+  const handleSelectPhotos = (files: File[]) => {
+    const pending: PendingMediaItem[] = files.map(f => ({
+      file: f,
+      previewUrl: URL.createObjectURL(f),
+      type: 'photo'
+    }));
+    setPreviewItems(pending);
+    setIsPreviewOpen(true);
+  };
+
+  // Handle Video chosen from attachment modal
+  const handleSelectVideo = (file: File) => {
+    const pending: PendingMediaItem[] = [{
+      file,
+      previewUrl: URL.createObjectURL(file),
+      type: 'video'
+    }];
+    setPreviewItems(pending);
+    setIsPreviewOpen(true);
+  };
+
+  // Handle File chosen from attachment modal
+  const handleSelectFile = (file: File) => {
+    const pending: PendingMediaItem[] = [{
+      file,
+      previewUrl: URL.createObjectURL(file),
+      type: 'file'
+    }];
+    setPreviewItems(pending);
+    setIsPreviewOpen(true);
+  };
+
+  // Dispatch final media send from preview modal (photo, video with caption, file, album)
+  const handleSendFromPreview = async (items: PendingMediaItem[], caption: string, duration?: number) => {
+    if (items.length === 1) {
+      const item = items[0];
+      await sendMedia(
+        item.type,
+        item.file,
+        duration || item.duration,
+        caption,
+        item.file.name,
+        `${Math.round(item.file.size / 1024)} KB`
+      );
+    } else {
+      // Multiple items: send as album
+      const photos = items.map(i => ({ file: i.file }));
+      await sendAlbum(photos, caption);
+    }
+    setText('');
+    setDraft(activeChat.id, '');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  const handleAddMoreToPreview = (files: FileList | File[]) => {
+    const newItems: PendingMediaItem[] = Array.from(files).map(f => ({
+      file: f,
+      previewUrl: URL.createObjectURL(f),
+      type: f.type.startsWith('video/') ? 'video' : 'photo'
+    }));
+    setPreviewItems(prev => [...prev, ...newItems]);
+  };
+
+  const handleSelectCommand = (command: string) => {
+    sendMessage(command);
+  };
+
+  const sendDemoVoiceNote = async () => {
+    try {
+      const demo = await createDemoAudioVoice(3);
+      await sendMedia('voice', demo.blob, demo.duration, undefined, 'demo_voice.wav');
+      notify({
+        title: 'Voice Note Sent',
+        message: 'Demo voice message delivered (3s)',
+        type: 'success',
+        duration: 2500
+      });
+    } catch (err) {
+      console.error('Failed to send demo voice:', err);
+    }
   };
 
   const startVoiceRecording = async () => {
@@ -86,9 +243,11 @@ export const ChatBar: React.FC = () => {
         title: isPermissionDenied ? 'Microphone Permission Needed' : 'Microphone Unavailable',
         message: isPermissionDenied
           ? 'Please enable microphone access in your browser or device settings.'
-          : 'Microphone hardware was not detected or is busy in another app.',
+          : 'Microphone hardware was not detected. Click below to send a demo voice note.',
         type: 'alert',
-        duration: 4000
+        duration: 5500,
+        actionLabel: 'Send Demo Voice',
+        onAction: sendDemoVoiceNote
       });
     }
   };
@@ -111,7 +270,14 @@ export const ChatBar: React.FC = () => {
         });
         return;
       }
-      await sendMedia('voice', result.blob, result.duration);
+      // Send as voice message
+      await sendMedia('voice', result.blob, result.duration, undefined, 'voice.webm');
+      notify({
+        title: 'Voice Sent',
+        message: `Voice note delivered (${result.duration}s)`,
+        type: 'success',
+        duration: 2500
+      });
     } catch (err) {
       console.error('Error stopping recording:', err);
       notify({
@@ -145,22 +311,49 @@ export const ChatBar: React.FC = () => {
         isOpen={isStickerPickerOpen}
         onClose={() => setIsStickerPickerOpen(false)}
         onSelectEmoji={handleSelectEmoji}
+        onSelectSticker={handleSelectSticker}
       />
 
       {/* Media Attachment Modal */}
       <MediaAttachmentModal
         isOpen={isAttachmentOpen}
         onClose={() => setIsAttachmentOpen(false)}
-        onSelectMedia={handleSelectMedia}
+        onSelectPhotos={handleSelectPhotos}
+        onSelectVideo={handleSelectVideo}
+        onSelectFile={handleSelectFile}
+      />
+
+      {/* Bot Menu Commands Drawer */}
+      <BotCommandsMenu
+        isOpen={isBotMenuOpen}
+        onClose={() => setIsBotMenuOpen(false)}
+        onSelectCommand={handleSelectCommand}
+        botName={activeChat.user.firstName}
+        onOpenCreateInlineButton={openCreateInlineButton}
+      />
+
+      {/* Media Preview Modal with Caption and Album */}
+      <MediaPreviewModal
+        isOpen={isPreviewOpen}
+        items={previewItems}
+        initialCaption={text}
+        onClose={() => setIsPreviewOpen(false)}
+        onSend={handleSendFromPreview}
+        onAddMore={handleAddMoreToPreview}
       />
 
       {/* Main Single Row Controls */}
       <div className="flex items-center gap-1.5 sm:gap-2 max-w-5xl mx-auto w-full">
-        {/* Bot Menu Button - Hidden on mobile so input capsule has maximum width and consistent line */}
+        {/* Interactive Bot Menu Button */}
         <button
           type="button"
-          className="hidden sm:flex w-11 h-11 rounded-full items-center justify-center transition-all duration-150 flex-shrink-0 btn-press text-[var(--color-text-muted)] hover:text-white hover:bg-white/5"
-          title="Bot Menu"
+          onClick={() => setIsBotMenuOpen(!isBotMenuOpen)}
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
+            isBotMenuOpen
+              ? 'text-[var(--color-accent)] bg-[var(--color-accent)]/15 ring-1 ring-[var(--color-accent)]/30'
+              : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
+          }`}
+          title="Bot Commands Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
@@ -169,12 +362,12 @@ export const ChatBar: React.FC = () => {
         <button
           type="button"
           onClick={() => setIsAttachmentOpen(!isAttachmentOpen)}
-          className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all duration-150 flex-shrink-0 btn-press ${
             isAttachmentOpen
               ? 'text-[var(--color-accent)] bg-[var(--color-accent)]/15 ring-1 ring-[var(--color-accent)]/30'
               : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
           }`}
-          title="Attach Photo or Video"
+          title="Attach Photo, Video or File"
         >
           <Paperclip className="w-5 h-5 rotate-45" />
         </button>
@@ -216,13 +409,14 @@ export const ChatBar: React.FC = () => {
                 : 'bg-[var(--color-bg-input)] border-[var(--color-border)] focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent-glow)]'
             }`}
           >
-            {/* Native Appearance Stripped Textarea (No native browser inset box) */}
+            {/* Native Appearance Stripped Textarea with Clipboard Paste Support */}
             <textarea
               ref={textareaRef}
               rows={1}
               value={text}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={`Message ${activeChat.user.firstName}...`}
               style={{
                 border: 'none',
@@ -231,12 +425,13 @@ export const ChatBar: React.FC = () => {
                 WebkitAppearance: 'none',
                 MozAppearance: 'none',
                 appearance: 'none',
-                background: 'transparent'
+                background: 'transparent',
+                fontSize: `var(--tg-chat-font-size, 15px)`
               }}
-              className="w-full bg-transparent border-0 outline-none shadow-none ring-0 focus:ring-0 focus:outline-none appearance-none text-base sm:text-sm resize-none max-h-32 text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] py-1.5 leading-snug tracking-tight"
+              className="w-full bg-transparent border-0 outline-none shadow-none ring-0 focus:ring-0 focus:outline-none appearance-none resize-none max-h-32 text-[var(--color-text-main)] placeholder-[var(--color-text-muted)] py-1.5 leading-snug tracking-tight"
             />
 
-            {/* Emoji Button */}
+            {/* Emoji & Sticker Button */}
             <button
               type="button"
               onClick={() => setIsStickerPickerOpen(!isStickerPickerOpen)}
@@ -245,7 +440,7 @@ export const ChatBar: React.FC = () => {
                   ? 'text-[var(--color-accent)] bg-[var(--color-accent)]/15'
                   : 'text-[var(--color-text-muted)] hover:text-white hover:bg-white/5'
               }`}
-              title="Emojis"
+              title="Stickers & Emojis"
             >
               <Smile className="w-5 h-5" />
             </button>
@@ -257,7 +452,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={finishVoiceRecording}
-            className="w-11 h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press bg-emerald-500 text-white shadow-emerald-500/30 hover:bg-emerald-400"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press bg-emerald-500 text-white shadow-emerald-500/30 hover:bg-emerald-400"
             title="Send Voice Note"
           >
             <Check className="w-5 h-5 stroke-[2.5]" />
@@ -266,7 +461,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={handleSendText}
-            className="w-11 h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press btn-glow animate-send-pop bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:bg-[var(--color-accent-hover)] shadow-[var(--color-accent-glow)] font-bold"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full shadow-lg flex items-center justify-center flex-shrink-0 btn-press btn-glow animate-send-pop bg-[var(--color-accent)] text-[var(--color-accent-text)] hover:bg-[var(--color-accent-hover)] shadow-[var(--color-accent-glow)] font-bold"
             title="Send Message"
           >
             <Send className="w-4 h-4 ml-0.5" />
@@ -275,7 +470,7 @@ export const ChatBar: React.FC = () => {
           <button
             type="button"
             onClick={startVoiceRecording}
-            className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors btn-press text-[var(--color-text-muted)] hover:text-white hover:bg-white/5"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors btn-press text-[var(--color-text-muted)] hover:text-white hover:bg-white/5"
             title="Voice Note"
           >
             <Mic className="w-5 h-5" />

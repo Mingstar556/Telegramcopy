@@ -21,11 +21,13 @@ import { SwipeableChatItem } from './SwipeableChatItem';
 interface SidebarProps {
   onOpenAccount: () => void;
   onOpenSettings: () => void;
+  onOpenGenerator?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   onOpenAccount,
-  onOpenSettings
+  onOpenSettings,
+  onOpenGenerator
 }) => {
   const { account } = useAuth();
   const {
@@ -61,7 +63,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       {/* Top Header - Employee Portal Identifier */}
       <div className="h-16 px-4 flex items-center justify-between border-b border-[var(--color-border)] glass-header relative z-20">
-        <div className="flex items-center gap-3 min-w-0">
+        <div
+          onClick={onOpenAccount}
+          className="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-85 transition group"
+          title="Manage Accounts & Profile"
+        >
           <Avatar
             id={account?.userId || 'bot'}
             name={account?.botName || 'Bot'}
@@ -111,6 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClose={() => setIsMenuOpen(false)}
               onOpenAccount={onOpenAccount}
               onOpenSettings={onOpenSettings}
+              onOpenGenerator={onOpenGenerator}
             />
           </div>
         </div>

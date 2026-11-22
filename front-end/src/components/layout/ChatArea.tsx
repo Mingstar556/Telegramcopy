@@ -1,21 +1,19 @@
-import React, { useState } from 'react';
-import { ArrowLeft, MoreVertical, Search, Bot, Sparkles } from 'lucide-react';
+import React from 'react';
+import { ArrowLeft, MoreVertical, Search, Bot } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Avatar } from '../common/Avatar';
 import { QuickAppearancePopover } from '../common/QuickAppearancePopover';
 import { ChatBar } from '../chat/ChatBar';
 import { MessageList } from '../chat/MessageList';
-import { ChatSummaryModal } from '../chat/ChatSummaryModal';
 
 interface ChatAreaProps {
   onBackToSidebar: () => void;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
-  const { activeChat } = useChat();
+  const { activeChat, openUserProfile } = useChat();
   const { theme, settings } = useTheme();
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
   const isGold = theme === 'black-gold';
 
@@ -39,10 +37,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
       {/* Top Glass Header */}
       {activeChat ? (
         <div className="h-16 px-4 sm:px-6 flex items-center justify-between border-b border-[var(--color-border)] glass-header select-none z-10 transition-colors duration-200">
-          <div className="flex items-center gap-3.5 min-w-0">
+          <div
+            onClick={() => !activeChat.isSavedMessages && openUserProfile(activeChat.user)}
+            className={`flex items-center gap-3.5 min-w-0 ${!activeChat.isSavedMessages ? 'cursor-pointer hover:opacity-85 transition' : ''}`}
+          >
             {/* Back button on mobile */}
             <button
-              onClick={onBackToSidebar}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBackToSidebar();
+              }}
               className="md:hidden p-2 -ml-1.5 text-[var(--color-text-muted)] hover:text-white rounded-full transition btn-press"
               title="Back"
             >
@@ -88,18 +92,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
           <div className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
             <QuickAppearancePopover className="hidden md:block" />
             <button
-              onClick={() => setIsSummaryOpen(true)}
-              className={`px-2.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition btn-press ${
-                isGold
-                  ? 'bg-[#d4af37]/10 border-[#d4af37]/30 text-[#f3c853] hover:bg-[#d4af37]/20'
-                  : 'bg-white/5 border-white/10 text-blue-400 hover:bg-white/10'
-              }`}
-              title="Summarize Conversation"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Summarize</span>
-            </button>
-            <button
               className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/5 hover:text-white transition btn-press"
               title="Search"
             >
@@ -128,12 +120,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ onBackToSidebar }) => {
 
       {/* Bottom Composer */}
       {activeChat && <ChatBar />}
-
-      {/* AI Chat Summary Modal */}
-      <ChatSummaryModal
-        isOpen={isSummaryOpen}
-        onClose={() => setIsSummaryOpen(false)}
-      />
     </main>
   );
 };

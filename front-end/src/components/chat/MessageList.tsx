@@ -1,18 +1,21 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bot, MessageCircle, Sparkles, Radio } from 'lucide-react';
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { MessageBubble } from './MessageBubble';
+import { ForwardModal } from './ForwardModal';
+import { ChatMessage } from '../../types/chat';
 
 export const MessageList: React.FC = () => {
   const { activeMessages, activeChat, typingStatus, isLoading } = useChat();
   const { theme } = useTheme();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
 
   // Auto scroll to latest message or active typing bubble
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMessages, typingStatus]);
+  }, [activeMessages.length, typingStatus]);
 
   const isGold = theme === 'black-gold';
 
@@ -49,7 +52,7 @@ export const MessageList: React.FC = () => {
       </div>
 
       {/* Messages or Skeleton Loading State */}
-      {isLoading ? (
+      {isLoading && activeMessages.length === 0 ? (
         <div className="space-y-4 py-2">
           <div className="flex justify-start">
             <div className="w-48 h-10 rounded-2xl rounded-bl-sm skeleton-shimmer" />
@@ -71,11 +74,15 @@ export const MessageList: React.FC = () => {
         </div>
       ) : (
         activeMessages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            onForward={(m) => setForwardingMessage(m)}
+          />
         ))
       )}
 
-      {/* Live Animated Telegram Typing Bubble with Pulsing Aura */}
+      {/* Live Animated Telegram Typing Bubble */}
       {typingStatus && (
         <div className="flex items-center gap-2 my-2 animate-msg-in">
           <div
@@ -95,6 +102,13 @@ export const MessageList: React.FC = () => {
       )}
 
       <div ref={bottomRef} />
+
+      {/* Forward Modal */}
+      <ForwardModal
+        isOpen={Boolean(forwardingMessage)}
+        message={forwardingMessage}
+        onClose={() => setForwardingMessage(null)}
+      />
     </div>
   );
 };
