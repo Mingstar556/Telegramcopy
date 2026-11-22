@@ -75,7 +75,7 @@ Write-Host "====================================================================
 Write-Host "[3/3] Starting Live Servers..." -ForegroundColor Cyan
 Write-Host "===============================================================================" -ForegroundColor Cyan
 
-Start-Process cmd -ArgumentList "/k title UserBot Backend & Database [Port 8000] && color 0B && cd /d `"$rootDir\backend`" && `"$pythonCmd`" manage.py runserver 0.0.0.0:8000"
+Start-Process cmd -ArgumentList "/k title UserBot Backend Port 8000 && color 0B && cd /d `"$rootDir\backend`" && `"$pythonCmd`" manage.py runserver 0.0.0.0:8000"
 Start-Process cmd -ArgumentList "/k title UserBot Frontend Client [Port 5173] && color 0A && cd /d `"$rootDir\front-end`" && npm run dev -- --host 0.0.0.0 --port 5173"
 
 Start-Sleep -Seconds 3
