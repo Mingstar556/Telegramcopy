@@ -94,7 +94,7 @@ export const AppContent: React.FC = () => {
     );
   }
 
-  // 3. If not authenticated, render Login Modal with test account & red error screen
+  // 3. If not authenticated, render Login Modal
   if (!isAuthenticated) {
     return <LoginModal />;
   }
@@ -110,7 +110,7 @@ export const AppContent: React.FC = () => {
     <div className="flex flex-col md:flex-row h-[100dvh] w-screen overflow-hidden bg-[var(--color-bg-base)] text-[var(--color-text-main)] select-none">
       {/* 
         Cross-Platform Responsive Split Layout:
-        - Mobile: Toggle between Sidebar, SpecialView, or ChatArea
+        - Mobile: Toggle between Sidebar or ChatArea
         - Tablet & Desktop: Dual column split view (Telegram Web style)
       */}
 

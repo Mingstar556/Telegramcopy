@@ -17,10 +17,12 @@ import {
   Sun,
   Moon,
   Minus,
-  Plus
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useChat } from '../../contexts/ChatContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import {
   FontFamily,
@@ -48,6 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     playNotificationSound
   } = useTheme();
   const { notify } = useNotification();
+  const { wipeAllChats } = useChat();
 
   const [activeTab, setActiveTab] = useState<'theme' | 'chat' | 'details'>('theme');
   const [themeFilter, setThemeFilter] = useState<'all' | 'dark' | 'light'>('all');
@@ -992,6 +995,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
                   Real-time WebSockets connected to Django Channels ASGI server.
+                </p>
+              </div>
+
+              {/* Chat History & Cache Cleanup */}
+              <div className="p-4 rounded-2xl bg-black/30 border border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-xs text-[var(--color-text-main)]">Chat History & Cache</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('Wipe and clear all local chat history and cache? This cannot be undone.')) {
+                        wipeAllChats();
+                        onClose();
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-semibold text-xs transition btn-press"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear Chat History</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+                  Removes cached messages, draft texts, and local conversation history from browser storage.
                 </p>
               </div>
             </div>

@@ -34,7 +34,7 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
   const countdownRef = useRef<number>(4);
 
   // Health check handler
-  const performCheck = async (urlToTest?: string) => {
+  const performCheck = async (targetUrl?: string) => {
     setIsChecking(true);
     setRadarPulse(p => p + 1);
     try {
@@ -112,19 +112,11 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
       {/* Main Container */}
       <div className="relative z-10 w-full max-w-xl mx-auto flex flex-col items-center">
         
-        {/* Retro Broadcast TV Test Pattern Bars Badge */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 border border-white/10 backdrop-blur-md mb-6 shadow-lg">
-          <div className="flex gap-1">
-            <span className="w-2.5 h-3 bg-white rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-yellow-400 rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-cyan-400 rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-green-500 rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-fuchsia-500 rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-red-500 rounded-xs inline-block" />
-            <span className="w-2.5 h-3 bg-blue-600 rounded-xs inline-block" />
-          </div>
-          <span className="text-[11px] font-mono tracking-widest text-zinc-400 uppercase ml-2">
-            BROADCAST STANDBY
+        {/* Connection Standby Indicator */}
+        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/60 border border-white/10 backdrop-blur-md mb-6 shadow-lg">
+          <Radio className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+          <span className="text-[11px] font-mono tracking-widest text-zinc-400 uppercase">
+            CONNECTION STANDBY
           </span>
         </div>
 

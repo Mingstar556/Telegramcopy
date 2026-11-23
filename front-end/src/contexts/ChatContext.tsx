@@ -13,7 +13,7 @@ import {
 import { useAuth } from './AuthContext';
 import { useTheme } from './ThemeContext';
 import { useNotification } from './NotificationContext';
-import { getStoredItem, setStoredItem } from '../utils/storage';
+import { getStoredItem, setStoredItem, removeStoredItem } from '../utils/storage';
 import { compressImage, svgToPngDataUrl, computeFileHash, generateMicroBlurThumbnail } from '../utils/imageCompressor';
 
 interface ChatContextValue {
@@ -220,19 +220,31 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sync state to local storage when changed
   useEffect(() => {
     if (userId) {
-      setStoredItem(CONVERSATIONS_KEY, conversations);
+      if (conversations.length === 0) {
+        removeStoredItem(CONVERSATIONS_KEY);
+      } else {
+        setStoredItem(CONVERSATIONS_KEY, conversations);
+      }
     }
   }, [conversations, userId]);
 
   useEffect(() => {
-    if (userId && Object.keys(messagesByChat).length > 0) {
-      setStoredItem(MESSAGES_KEY, messagesByChat);
+    if (userId) {
+      if (Object.keys(messagesByChat).length === 0) {
+        removeStoredItem(MESSAGES_KEY);
+      } else {
+        setStoredItem(MESSAGES_KEY, messagesByChat);
+      }
     }
   }, [messagesByChat, userId]);
 
   useEffect(() => {
     if (userId) {
-      setStoredItem(DRAFTS_KEY, draftsByChat);
+      if (Object.keys(draftsByChat).length === 0) {
+        removeStoredItem(DRAFTS_KEY);
+      } else {
+        setStoredItem(DRAFTS_KEY, draftsByChat);
+      }
     }
   }, [draftsByChat, userId]);
 
@@ -1721,7 +1733,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // CLEAR CHAT
-  const clearChat = (chatId: string, _deleteForEveryone: boolean = true) => {
+  const clearChat = (chatId: string, deleteForEveryone: boolean = true) => {
     setMessagesByChat(prev => ({ ...prev, [chatId]: [] }));
     setConversations(prev =>
       prev.map(c => (c.id === chatId ? { ...c, lastMessage: undefined, unreadCount: 0 } : c))
@@ -1778,6 +1790,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem(`tg_convs_${userId}`);
         localStorage.removeItem(`tg_msgs_${userId}`);
         localStorage.removeItem(`tg_drafts_${userId}`);
+        localStorage.removeItem(`tg_conversations_${userId}`);
+        localStorage.removeItem(`tg_messages_${userId}`);
       } catch {}
       await api.wipeChatHistory(userId, undefined, true).catch(() => {});
     }

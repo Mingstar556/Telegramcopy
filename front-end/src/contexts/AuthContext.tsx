@@ -129,7 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const target = authState.accounts.find(a => a.userId === userId);
     if (!target) return;
 
-    const targetToken = localStorage.getItem(`tg_bot_token_${userId}`) || target.assignedToken || 'dummy_token';
+    const targetToken = localStorage.getItem(`tg_bot_token_${userId}`) || target.assignedToken || '';
 
     localStorage.setItem('tg_bot_account', JSON.stringify(target));
     localStorage.setItem('tg_bot_token', targetToken);
