@@ -11,7 +11,7 @@ import { UserProfileModal } from './components/modals/UserProfileModal';
 import { CreateInlineButtonModal } from './components/chat/CreateInlineButtonModal';
 import { NoSignalScreen } from './components/common/NoSignalScreen';
 import { NotificationToastContainer } from './components/common/NotificationToast';
-import { api } from './services/api';
+import { api, setApiBaseUrl } from './services/api';
 import { Loader2, Radio } from 'lucide-react';
 
 export const AppContent: React.FC = () => {
@@ -39,6 +39,21 @@ export const AppContent: React.FC = () => {
     let isMounted = true;
 
     const probeSignal = async () => {
+      // Auto-load config.json if not overridden in localStorage or injected by wrapper
+      if (typeof window !== 'undefined' && !localStorage.getItem('userbot_server_url') && !(window as any).__USERBOT_CONFIG__) {
+        try {
+          const cfgRes = await fetch('/config.json', { cache: 'no-cache' });
+          if (cfgRes.ok) {
+            const cfgData = await cfgRes.json();
+            if (cfgData.api_url) {
+              setApiBaseUrl(cfgData.api_url);
+            }
+          }
+        } catch {
+          // fallback to defaults
+        }
+      }
+
       const res = await api.checkHealth();
       if (!isMounted) return;
 

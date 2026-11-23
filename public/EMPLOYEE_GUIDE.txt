@@ -1,0 +1,61 @@
+========================================================================
+                          TBOT CHAT - EMPLOYEE CLIENT
+========================================================================
+
+Welcome to the company Telegram customer service chat client!
+This client connects your workstation directly to the central company 
+Telegram server, allowing you to converse with Telegram clients in real time.
+
+------------------------------------------------------------------------
+[ 1. QUICK START (RECOMMENDED) ]
+------------------------------------------------------------------------
+
+1. DOUBLE-CLICK "TBOTchat.exe" (or "START_CLIENT.bat"):
+   - The application launches in a clean native desktop window.
+   - No Python or node installation is required.
+
+2. CONNECTING TO YOUR COMPANY SERVER:
+   - If opening for the first time, or if the server address changed,
+     the "CONNECTION STANDBY" screen will appear on screen.
+   - Enter your company server address, for example:
+       * Office LAN      : http://192.168.1.100:8000
+       * Localhost       : http://127.0.0.1:8000
+       * Cloud / Domain  : https://chat.company.com
+   - Click "Save & Connect". The application will automatically test
+     the connection and save it to your PC.
+
+3. LOG IN:
+   - Enter your assigned Employee User ID and Operator Password.
+   - Click "Sign In" to access the live Telegram chat dashboard.
+
+------------------------------------------------------------------------
+[ 2. SERVER CONNECTION TOOLS ]
+------------------------------------------------------------------------
+
+If you need to change or test the backend server address before opening:
+- Run "CONNECT_SERVER.bat" (or "Connect_Server.exe")
+- It displays your current address, tests connection health, and
+  updates config.json automatically.
+
+------------------------------------------------------------------------
+[ 3. WEB BROWSER FALLBACK ]
+------------------------------------------------------------------------
+
+If your PC blocks .exe files or you prefer using Google Chrome / Microsoft Edge:
+- Double-click "START_WEB_CLIENT.bat"
+- It starts a fast local client server and opens your default browser at:
+  http://127.0.0.1:3000
+
+------------------------------------------------------------------------
+[ 4. SUMMARY OF FILES IN THIS FOLDER ]
+------------------------------------------------------------------------
+- TBOTchat.exe         : Standalone desktop application.
+- START_CLIENT.bat     : Easy one-click launcher for TBOTchat.exe.
+- CONNECT_SERVER.bat   : Server connection tester & configuration wizard.
+- Connect_Server.exe   : Standalone CLI connection test tool.
+- START_WEB_CLIENT.bat : Fallback launcher to run in Chrome / Edge.
+- config.json          : Holds your server URL (api_url & ws_url).
+- icon.ico             : Application icon.
+- dist/                : Compiled high-speed frontend assets.
+- EMPLOYEE_GUIDE.txt   : This guide.
+========================================================================
