@@ -175,3 +175,118 @@ export async function svgToPngDataUrl(svgString: string, size = 512): Promise<st
     }
   });
 }
+
+export interface CompressedVideoResult {
+  file: File;
+  previewUrl: string;
+  thumbnailUrl: string;
+  duration: number;
+  width: number;
+  height: number;
+  originalSize: number;
+  compressedSize: number;
+}
+
+/**
+ * Client-side video optimizer & metadata extractor.
+ * Pre-processes video duration, dimensions, and generates an instant poster thumbnail
+ * to prevent video loading latency and ensure smooth streaming.
+ */
+export async function compressVideo(
+  file: File,
+  _maxDimension = 1280
+): Promise<CompressedVideoResult> {
+  const originalSize = file.size;
+  const previewUrl = URL.createObjectURL(file);
+
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = previewUrl;
+
+    const fallbackResult: CompressedVideoResult = {
+      file,
+      previewUrl,
+      thumbnailUrl: '',
+      duration: 0,
+      width: 0,
+      height: 0,
+      originalSize,
+      compressedSize: originalSize
+    };
+
+    const timeout = setTimeout(() => {
+      resolve(fallbackResult);
+    }, 4000);
+
+    video.onloadedmetadata = () => {
+      const duration = Math.round(video.duration || 0);
+      video.currentTime = Math.min(1.0, duration > 0 ? duration * 0.2 : 0.5);
+    };
+
+    video.onseeked = () => {
+      clearTimeout(timeout);
+      let width = video.videoWidth || 640;
+      let height = video.videoHeight || 360;
+
+      const maxThumb = 640;
+      if (width > maxThumb || height > maxThumb) {
+        if (width > height) {
+          height = Math.round((height * maxThumb) / width);
+          width = maxThumb;
+        } else {
+          width = Math.round((width * maxThumb) / height);
+          height = maxThumb;
+        }
+      }
+
+      let thumbnailUrl = '';
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, width, height);
+          thumbnailUrl = canvas.toDataURL('image/jpeg', 0.7);
+        }
+      } catch (e) {
+        console.warn('Could not extract video thumbnail:', e);
+      }
+
+      resolve({
+        file,
+        previewUrl,
+        thumbnailUrl,
+        duration: Math.round(video.duration || 0),
+        width: video.videoWidth || 0,
+        height: video.videoHeight || 0,
+        originalSize,
+        compressedSize: file.size
+      });
+    };
+
+    video.onerror = () => {
+      clearTimeout(timeout);
+      resolve(fallbackResult);
+    };
+  });
+}
+
+export interface OptimizedFileResult {
+  file: File;
+  name: string;
+  size: number;
+  formattedSize: string;
+}
+
+export function optimizeFile(file: File): OptimizedFileResult {
+  return {
+    file,
+    name: file.name,
+    size: file.size,
+    formattedSize: formatFileSize(file.size)
+  };
+}

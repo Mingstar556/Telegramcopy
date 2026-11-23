@@ -13,8 +13,6 @@ interface AuthContextValue extends AuthState {
   refreshUserData: () => Promise<void>;
   updateBotAvatar: (file: File) => Promise<string>;
   removeBotAvatar: () => Promise<void>;
-  isMockMode: boolean;
-  setMockMode: (val: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -49,13 +47,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   });
 
-  const [isMockMode, setIsMockModeState] = useState<boolean>(() => api.isMockMode());
-
-  const setMockMode = (enabled: boolean) => {
-    api.setMockMode(enabled);
-    setIsMockModeState(enabled);
-  };
-
   // Connect WebSocket when authenticated
   useEffect(() => {
     if (authState.isAuthenticated && authState.account?.userId) {
@@ -64,6 +55,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       wsService.disconnect();
     }
   }, [authState.isAuthenticated, authState.account?.userId, authState.token]);
+
+  // Sync session state across multiple browser windows / tabs in real time
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'tg_bot_account' || e.key === 'tg_bot_token' || e.key === 'tg_saved_accounts') {
+        const savedAccount = localStorage.getItem('tg_bot_account');
+        const savedToken = localStorage.getItem('tg_bot_token');
+        const savedAccounts = getStoredItem<BotAccount[]>('tg_saved_accounts', []);
+
+        let parsedAccount: BotAccount | null = null;
+        try {
+          parsedAccount = savedAccount ? JSON.parse(savedAccount) : null;
+        } catch {
+          parsedAccount = null;
+        }
+
+        setAuthState(prev => ({
+          ...prev,
+          isAuthenticated: Boolean(parsedAccount && savedToken),
+          account: parsedAccount,
+          token: savedToken || null,
+          accounts: savedAccounts.length > 0 ? savedAccounts : prev.accounts
+        }));
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   const login = async (creds: LoginCredentials) => {
     setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -222,9 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         refreshUserData,
         updateBotAvatar,
-        removeBotAvatar,
-        isMockMode,
-        setMockMode
+        removeBotAvatar
       }}
     >
       {children}

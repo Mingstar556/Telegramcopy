@@ -11,18 +11,21 @@ logger = logging.getLogger(__name__)
 @receiver(connection_created)
 def configure_sqlite_speed(sender, connection, **kwargs):
     """
-    Enables SQLite WAL (Write-Ahead Logging) mode and high-concurrency PRAGMAs.
-    Allows concurrent reads and writes without database lock contention.
+    Enables SQLite WAL (Write-Ahead Logging) mode and enterprise high-concurrency PRAGMAs.
+    Allows hundreds of concurrent operator reads and writes without database lock contention.
     """
     if connection.vendor == 'sqlite':
         try:
             with connection.cursor() as cursor:
                 cursor.execute('PRAGMA journal_mode = WAL;')
                 cursor.execute('PRAGMA synchronous = NORMAL;')
-                cursor.execute('PRAGMA busy_timeout = 25000;')
+                cursor.execute('PRAGMA busy_timeout = 60000;')
                 cursor.execute('PRAGMA cache_size = -64000;')
-        except Exception:
-            pass
+                cursor.execute('PRAGMA temp_store = MEMORY;')
+                cursor.execute('PRAGMA mmap_size = 268435456;')
+                cursor.execute('PRAGMA foreign_keys = ON;')
+        except Exception as e:
+            logger.debug(f"[SQLite Config Warning] {e}")
 
 
 class TelegramChatConfig(AppConfig):

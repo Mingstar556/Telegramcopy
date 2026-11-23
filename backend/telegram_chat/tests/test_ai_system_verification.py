@@ -214,6 +214,7 @@ class AISystemVerificationTests(TestCase):
         """Verifies chats list returns saved messages first and sorts conversations by timestamp."""
         # Create 2 test users and messages with distinct timestamps
         user_a = TelegramUser.objects.create(telegram_id="user_a", first_name="Alice")
+        time.sleep(0.02)
         user_b = TelegramUser.objects.create(telegram_id="user_b", first_name="Bob")
 
         ChatMessage.objects.create(
@@ -222,7 +223,7 @@ class AISystemVerificationTests(TestCase):
             to_user=self.operator_id,
             message="Old message from Alice"
         )
-
+        time.sleep(0.02)
         ChatMessage.objects.create(
             message_uid="msg_b_new",
             sender_id="user_b",

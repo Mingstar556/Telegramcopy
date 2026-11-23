@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { api } from '../services/api';
 import { wsService } from '../services/websocket';
-import { INITIAL_MOCK_CONVERSATIONS } from '../services/mockData';
 import {
   ChatConversation,
   ChatMessage,
@@ -45,7 +44,7 @@ interface ChatContextValue {
     generalCaption?: string
   ) => Promise<void>;
   toggleReaction: (chatId: string, messageId: string, emoji: string) => void;
-  deleteMessage: (chatId: string, messageId: string) => void;
+  deleteMessage: (chatId: string, messageId: string, deleteForEveryone?: boolean) => void;
   undoDeleteMessage: () => boolean;
   canUndo: boolean;
   forwardMessage: (targetChatId: string, message: ChatMessage) => Promise<void>;
@@ -53,10 +52,13 @@ interface ChatContextValue {
   saveMessageToSaved: (message: ChatMessage) => void;
   openSavedMessages: () => void;
   refreshChats: () => Promise<void>;
-  clearChat: (chatId: string) => void;
-  deleteChat: (chatId: string) => void;
+  clearChat: (chatId: string, deleteForEveryone?: boolean) => void;
+  deleteChat: (chatId: string, deleteForEveryone?: boolean) => void;
+  wipeAllChats: () => Promise<void>;
   toggleMuteChat: (chatId: string) => void;
   isChatMuted: (chatId: string) => boolean;
+  togglePinChat: (chatId: string) => void;
+  isChatPinned: (chatId: string) => boolean;
   // Drafts
   setDraft: (chatId: string, draft: string) => void;
   getDraft: (chatId: string) => string;
@@ -76,6 +78,66 @@ interface ChatContextValue {
 }
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
+
+const processFetchedMessages = (msgs: ChatMessage[]): ChatMessage[] => {
+  if (!msgs || msgs.length === 0) return [];
+  const normalMsgs: ChatMessage[] = [];
+  const reactionsToApply: ChatMessage[] = [];
+
+  for (const m of msgs) {
+    if (m.action === 'reaction') {
+      reactionsToApply.push(m);
+    } else {
+      normalMsgs.push(m);
+    }
+  }
+
+  if (reactionsToApply.length === 0) return normalMsgs;
+
+  return normalMsgs.map(msg => {
+    const matchingReactions = reactionsToApply.filter(r => {
+      const targetId = (r as any).reaction?.message_id || (r as any).messageId;
+      if (targetId === msg.id) return true;
+      if (msg.album && msg.album.some((p: any) => p.id === targetId)) return true;
+      return false;
+    });
+    if (matchingReactions.length === 0) return msg;
+
+    const currentReactions = msg.reactions ? [...msg.reactions] : [];
+    for (const r of matchingReactions) {
+      const emoji = (r as any).reaction?.emoji || (r as any).emoji || r.message;
+      const oldEmoji = (r as any).reaction?.old_emoji || (r as any).old_emoji;
+      const user = r.senderId || (r as any).userId;
+      const isRemoved = Boolean((r as any).is_removed || (r as any).reaction?.is_removed || (!emoji && oldEmoji));
+      const targetEmoji = emoji || oldEmoji;
+      if (!targetEmoji) continue;
+
+      const exIdx = currentReactions.findIndex(cr => cr.emoji === targetEmoji);
+      if (isRemoved) {
+        if (exIdx >= 0) {
+          const item = { ...currentReactions[exIdx] };
+          item.users = item.users.filter(u => u !== user);
+          item.count = Math.max(0, item.count - 1);
+          if (item.count <= 0) {
+            currentReactions.splice(exIdx, 1);
+          } else {
+            currentReactions[exIdx] = item;
+          }
+        }
+      } else {
+        if (exIdx >= 0) {
+          if (user && !currentReactions[exIdx].users.includes(user)) {
+            currentReactions[exIdx].users.push(user);
+            currentReactions[exIdx].count += 1;
+          }
+        } else {
+          currentReactions.push({ emoji: targetEmoji, count: 1, users: user ? [user] : [] });
+        }
+      }
+    }
+    return { ...msg, reactions: currentReactions };
+  });
+};
 
 export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { account, token, isAuthenticated } = useAuth();
@@ -185,10 +247,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       prev.map(c => (c.id === chatId ? { ...c, unreadCount: 0 } : c))
     );
     dismissByChatId(chatId);
-    const mock = INITIAL_MOCK_CONVERSATIONS.find(c => c.id === chatId);
-    if (mock) {
-      mock.unreadCount = 0;
-    }
   };
 
   const isChatUnseen = (chatId: string) => {
@@ -334,10 +392,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         api.fetchMessages(account.userId, activeChatId, token || undefined)
           .then(msgs => {
             if (isMounted && msgs && msgs.length > 0) {
+              const processed = processFetchedMessages(msgs);
               setMessagesByChat(prev => {
                 const current = prev[activeChatId] || [];
-                if (current.length !== msgs.length || (msgs.length > 0 && current[current.length - 1]?.id !== msgs[msgs.length - 1]?.id)) {
-                  return { ...prev, [activeChatId]: msgs };
+                if (current.length !== processed.length || (processed.length > 0 && current[current.length - 1]?.id !== processed[processed.length - 1]?.id)) {
+                  return { ...prev, [activeChatId]: processed };
                 }
                 return prev;
               });
@@ -372,7 +431,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       api.fetchMessages(account.userId, activeChatId, token || undefined)
         .then(msgs => {
           if (msgs && msgs.length > 0) {
-            setMessagesByChat(prev => ({ ...prev, [activeChatId]: msgs }));
+            const processed = processFetchedMessages(msgs);
+            setMessagesByChat(prev => ({ ...prev, [activeChatId]: processed }));
           }
         })
         .catch(err => {
@@ -391,6 +451,107 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTimeout(() => {
           setTypingChatIds(prev => ({ ...prev, [chatId]: false }));
         }, 3000);
+        return;
+      }
+
+      // Handle real-time delete_message: remove message from feed across tabs and devices
+      if (incomingMsg.action === 'delete_message') {
+        const targetChatId = (incomingMsg as any).chatId || (incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId) || chatId;
+        const targetMsgId = (incomingMsg as any).messageId || (incomingMsg as any).message_id || incomingMsg.id;
+        if (targetChatId && targetMsgId) {
+          setMessagesByChat(prev => {
+            const current = prev[targetChatId] || [];
+            const filtered = current.filter(m => m.id !== targetMsgId);
+            return { ...prev, [targetChatId]: filtered };
+          });
+        }
+        return;
+      }
+
+      // Handle real-time reactions: update target message reaction badges instead of appending as a new message/sticker
+      if (incomingMsg.action === 'reaction') {
+        const targetChatId = (incomingMsg as any).chatId || (incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId) || chatId;
+        const targetMsgId = incomingMsg.reaction?.message_id || (incomingMsg as any).messageId || (incomingMsg as any).reaction?.messageId;
+        const reactionEmoji = incomingMsg.reaction?.emoji || (incomingMsg as any).emoji || incomingMsg.message || '';
+        const oldEmoji = incomingMsg.reaction?.old_emoji || (incomingMsg as any).old_emoji || '';
+        const isRemoved = Boolean(
+          incomingMsg.is_removed ||
+          incomingMsg.reaction?.is_removed ||
+          (incomingMsg as any).is_removed ||
+          (incomingMsg as any).reaction?.is_removed ||
+          (!reactionEmoji && oldEmoji)
+        );
+        const reactingUserId = incomingMsg.senderId || (incomingMsg as any).userId || (incomingMsg.isOutgoing ? account?.userId : targetChatId);
+
+        if (targetChatId && targetMsgId) {
+          setMessagesByChat(prev => {
+            const chatMsgs = prev[targetChatId] || [];
+            const updated = chatMsgs.map(msg => {
+              const isTargetMsg = msg.id === targetMsgId || (msg.album && msg.album.some((p: any) => p.id === targetMsgId));
+              if (!isTargetMsg) return msg;
+
+              let currentReactions = msg.reactions ? [...msg.reactions] : [];
+
+              if (isRemoved) {
+                const removeEmoji = reactionEmoji || oldEmoji;
+                if (removeEmoji) {
+                  const exIdx = currentReactions.findIndex(r => r.emoji === removeEmoji);
+                  if (exIdx >= 0) {
+                    const r = { ...currentReactions[exIdx] };
+                    if (reactingUserId) {
+                      r.users = r.users.filter(u => u !== reactingUserId);
+                    }
+                    r.count = Math.max(0, r.count - 1);
+                    if (r.count <= 0) {
+                      currentReactions.splice(exIdx, 1);
+                    } else {
+                      currentReactions[exIdx] = r;
+                    }
+                  }
+                }
+              } else {
+                // If there was an old_emoji replaced by a new one
+                if (oldEmoji && oldEmoji !== reactionEmoji) {
+                  const oldIdx = currentReactions.findIndex(r => r.emoji === oldEmoji);
+                  if (oldIdx >= 0) {
+                    const rOld = { ...currentReactions[oldIdx] };
+                    if (reactingUserId) {
+                      rOld.users = rOld.users.filter(u => u !== reactingUserId);
+                    }
+                    rOld.count = Math.max(0, rOld.count - 1);
+                    if (rOld.count <= 0) {
+                      currentReactions.splice(oldIdx, 1);
+                    } else {
+                      currentReactions[oldIdx] = rOld;
+                    }
+                  }
+                }
+
+                if (reactionEmoji) {
+                  const existingReactionIdx = currentReactions.findIndex(r => r.emoji === reactionEmoji);
+                  if (existingReactionIdx >= 0) {
+                    const r = { ...currentReactions[existingReactionIdx] };
+                    if (reactingUserId && !r.users.includes(reactingUserId)) {
+                      r.users = [...r.users, reactingUserId];
+                      r.count += 1;
+                    }
+                    currentReactions[existingReactionIdx] = r;
+                  } else {
+                    currentReactions.push({
+                      emoji: reactionEmoji,
+                      count: 1,
+                      users: reactingUserId ? [reactingUserId] : []
+                    });
+                  }
+                }
+              }
+
+              return { ...msg, reactions: currentReactions };
+            });
+
+            return { ...prev, [targetChatId]: updated };
+          });
+        }
         return;
       }
 
@@ -516,7 +677,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           updated.splice(existingIndex, 1);
-          return [conv, ...updated];
+          if (conv.isPinned) {
+            // Find the position among pinned items or keep at very top
+            return [conv, ...updated];
+          } else {
+            // Insert after all pinned conversations so pinned chats remain permanently at the top
+            const firstUnpinnedIndex = updated.findIndex(c => !c.isPinned);
+            if (firstUnpinnedIndex === -1) {
+              return [...updated, conv];
+            } else {
+              updated.splice(firstUnpinnedIndex, 0, conv);
+              return updated;
+            }
+          }
         } else {
           const newConv: ChatConversation = {
             id: chatId,
@@ -535,7 +708,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isArchived: false
           };
 
-          return [newConv, ...prev];
+          // Place after all pinned conversations
+          const firstUnpinnedIndex = prev.findIndex(c => !c.isPinned);
+          if (firstUnpinnedIndex === -1) {
+            return [...prev, newConv];
+          } else {
+            const nextList = [...prev];
+            nextList.splice(firstUnpinnedIndex, 0, newConv);
+            return nextList;
+          }
         }
       });
 
@@ -983,7 +1164,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       : (finalFileOrBlob as File).name || (type === 'voice' ? 'voice.webm' : type === 'photo' ? 'photo.jpg' : type === 'video' ? 'video.mp4' : 'document.bin'));
 
     // Upload to server if live backend
-    if (typeof finalFileOrBlob !== 'string' && !api.isMockMode()) {
+    if (typeof finalFileOrBlob !== 'string') {
       try {
         const uploadRes = await api.uploadMedia(
           finalFileOrBlob,
@@ -1098,12 +1279,33 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       photos.map(p => compressImage(p.file, 1600, 1600, 0.82))
     );
 
-    const mediaAlbum: MediaItem[] = compressedList.map((comp, idx) => ({
-      type: 'photo',
-      url: comp.previewUrl,
-      fileName: comp.file.name,
-      fileSize: `${Math.round(comp.compressedSize / 1024)} KB`
-    }));
+    // Upload compressed photos to backend storage so server/Telegram get real accessible URLs
+    const uploadedMediaItems: MediaItem[] = await Promise.all(
+      compressedList.map(async (comp) => {
+        try {
+          const uploadRes = await api.uploadMedia(
+            comp.file,
+            comp.file.name || 'photo.jpg',
+            token || undefined
+          );
+          return {
+            type: 'photo' as const,
+            url: uploadRes?.url || comp.previewUrl,
+            fileName: comp.file.name,
+            fileSize: `${Math.round(comp.compressedSize / 1024)} KB`
+          };
+        } catch {
+          return {
+            type: 'photo' as const,
+            url: comp.previewUrl,
+            fileName: comp.file.name,
+            fileSize: `${Math.round(comp.compressedSize / 1024)} KB`
+          };
+        }
+      })
+    );
+
+    const mediaAlbum: MediaItem[] = uploadedMediaItems;
 
     const newAlbumMessage: ChatMessage = {
       id: msgId,
@@ -1172,11 +1374,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const toggleReaction = (chatId: string, messageId: string, emoji: string) => {
     if (!account?.userId) return;
     const currentUserId = account.userId;
+    let isRemoved = false;
 
     setMessagesByChat(prev => {
       const msgs = prev[chatId] || [];
       const updated = msgs.map(msg => {
-        if (msg.id !== messageId) return msg;
+        const isTarget = msg.id === messageId || (msg.album && msg.album.some((p: any) => p.id === messageId));
+        if (!isTarget) return msg;
 
         const currentReactions = msg.reactions ? [...msg.reactions] : [];
         const existingReactionIdx = currentReactions.findIndex(r => r.emoji === emoji);
@@ -1188,6 +1392,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Remove user reaction
             r.users = r.users.filter(u => u !== currentUserId);
             r.count = r.count - 1;
+            isRemoved = true;
           } else {
             // Add user reaction
             r.users = [...r.users, currentUserId];
@@ -1214,17 +1419,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { ...prev, [chatId]: updated };
     });
 
-    // Notify backend/WebSocket
-    wsService.send({
+    const payload = {
       "User-ID": currentUserId,
       "to-user": chatId,
       "message": emoji,
       "action": "reaction",
+      "is_removed": isRemoved,
       "reaction": {
         message_id: messageId,
-        emoji
+        emoji,
+        is_removed: isRemoved
       }
-    });
+    };
+
+    // Notify backend/WebSocket with REST fallback
+    const sent = wsService.send(payload);
+    if (!sent) {
+      api.sendMessage(payload, token || undefined).catch(() => {});
+    }
   };
 
   // UNDO LAST DELETED MESSAGE
@@ -1294,7 +1506,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // DELETE MESSAGE (WITH UNDO SUPPORT & NOTIFICATION)
-  const deleteMessage = (chatId: string, messageId: string) => {
+  const deleteMessage = (chatId: string, messageId: string, deleteForEveryone: boolean = true) => {
     setMessagesByChat(prev => {
       const currentMsgs = prev[chatId] || [];
       const index = currentMsgs.findIndex(m => m.id === messageId);
@@ -1320,12 +1532,15 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       });
 
-      // Notify backend/WebSocket
+      // Notify backend & Telegram via API and WebSocket
       if (account?.userId) {
+        api.deleteMessage(account.userId, chatId, messageId, deleteForEveryone).catch(() => {});
         wsService.send({
           "User-ID": account.userId,
           "to-user": chatId,
-          "message": "",
+          "message": messageId,
+          "message_id": messageId,
+          "delete_for_everyone": deleteForEveryone,
           "action": "delete_message",
           "media": undefined
         });
@@ -1404,8 +1619,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     try {
-      wsService.send(payload);
-      await api.sendMessage(payload, token || undefined);
+      const wsSent = wsService.send(payload);
+      if (!wsSent) {
+        await api.sendMessage(payload, token || undefined);
+      }
 
       setMessagesByChat(prev => ({
         ...prev,
@@ -1426,11 +1643,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // CLEAR CHAT
-  const clearChat = (chatId: string) => {
+  const clearChat = (chatId: string, _deleteForEveryone: boolean = true) => {
     setMessagesByChat(prev => ({ ...prev, [chatId]: [] }));
     setConversations(prev =>
       prev.map(c => (c.id === chatId ? { ...c, lastMessage: undefined, unreadCount: 0 } : c))
     );
+    if (account?.userId) {
+      api.wipeChatHistory(account.userId, chatId, false, false).catch(() => {});
+    }
     notify({
       title: 'Chat Cleared',
       message: 'All messages in this chat have been cleared',
@@ -1439,7 +1659,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // DELETE CHAT
-  const deleteChat = (chatId: string) => {
+  const deleteChat = (chatId: string, _deleteForEveryone: boolean = true) => {
     setConversations(prev => prev.filter(c => c.id !== chatId));
     setMessagesByChat(prev => {
       const next = { ...prev };
@@ -1452,6 +1672,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return next;
     });
 
+    if (account?.userId) {
+      api.wipeChatHistory(account.userId, chatId, false, true).catch(() => {});
+    }
+
     if (activeChatIdRef.current === chatId) {
       setActiveChatId(null);
     }
@@ -1461,6 +1685,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     notify({
       title: 'Chat Deleted',
       message: 'Conversation and history have been removed',
+      type: 'info'
+    });
+  };
+
+  // WIPE ALL CHATS
+  const wipeAllChats = async () => {
+    setConversations([]);
+    setMessagesByChat({});
+    setDraftsByChat({});
+    setActiveChatId(null);
+    if (userId) {
+      try {
+        localStorage.removeItem(`tg_convs_${userId}`);
+        localStorage.removeItem(`tg_msgs_${userId}`);
+        localStorage.removeItem(`tg_drafts_${userId}`);
+      } catch {}
+      await api.wipeChatHistory(userId, undefined, true).catch(() => {});
+    }
+    notify({
+      title: 'Chats Wiped',
+      message: 'All chats, history, and cached media have been cleared',
       type: 'info'
     });
   };
@@ -1488,6 +1733,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return Boolean(conv?.isMuted);
   };
 
+  // TOGGLE PIN CHAT
+  const togglePinChat = (chatId: string) => {
+    setConversations(prev =>
+      prev.map(c => {
+        if (c.id === chatId) {
+          const nextPinned = !c.isPinned;
+          notify({
+            title: nextPinned ? 'Chat Pinned' : 'Chat Unpinned',
+            message: nextPinned ? 'Chat pinned to the top of your list' : 'Chat unpinned',
+            type: 'info'
+          });
+          return { ...c, isPinned: nextPinned };
+        }
+        return c;
+      })
+    );
+  };
+
+  const isChatPinned = (chatId: string): boolean => {
+    const conv = conversations.find(c => c.id === chatId);
+    return Boolean(conv?.isPinned);
+  };
+
   // User Profile Open / Close
   const openUserProfile = (user: TelegramUser) => {
     setSelectedUserProfile(user);
@@ -1501,7 +1769,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const archivedConversations = conversations.filter(c => !!c.isArchived);
 
   const activeChat = conversations.find(c => c.id === activeChatId) || null;
-  const activeMessages = (activeChatId ? messagesByChat[activeChatId] : []) || [];
+  const activeMessages = ((activeChatId ? messagesByChat[activeChatId] : []) || []).filter(m => m.action !== 'reaction');
   const typingStatus = Boolean(
     (activeChatId && typingChatIds[activeChatId]) ||
     activeChat?.user?.lastSeen?.toLowerCase().includes('typing')
@@ -1537,8 +1805,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshChats,
         clearChat,
         deleteChat,
+        wipeAllChats,
         toggleMuteChat,
         isChatMuted,
+        togglePinChat,
+        isChatPinned,
         setDraft,
         getDraft,
         selectedUserProfile,

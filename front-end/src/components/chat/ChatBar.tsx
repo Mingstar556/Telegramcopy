@@ -3,12 +3,13 @@ import { Menu, Paperclip, Send, Smile, Mic, Trash2, Check, Bot } from 'lucide-re
 import { useChat } from '../../contexts/ChatContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import { audioRecorder, createDemoAudioVoice } from '../../services/audioRecorder';
+import { audioRecorder } from '../../services/audioRecorder';
 import { MediaAttachmentModal } from './MediaAttachmentModal';
 import { MediaPreviewModal, PendingMediaItem } from './MediaPreviewModal';
 import { StickerPicker } from './StickerPicker';
 import { BotCommandsMenu } from './BotCommandsMenu';
 import { StickerItem } from '../../types/chat';
+import { compressVideo } from '../../utils/imageCompressor';
 
 export const ChatBar: React.FC = () => {
   const {
@@ -152,15 +153,27 @@ export const ChatBar: React.FC = () => {
     setIsPreviewOpen(true);
   };
 
-  // Handle Video chosen from attachment modal
-  const handleSelectVideo = (file: File) => {
-    const pending: PendingMediaItem[] = [{
-      file,
-      previewUrl: URL.createObjectURL(file),
-      type: 'video'
-    }];
-    setPreviewItems(pending);
-    setIsPreviewOpen(true);
+  // Handle Video chosen from attachment modal with automatic compression & thumbnail extraction
+  const handleSelectVideo = async (file: File) => {
+    try {
+      const optimized = await compressVideo(file);
+      const pending: PendingMediaItem[] = [{
+        file: optimized.file,
+        previewUrl: optimized.thumbnailUrl || optimized.previewUrl,
+        type: 'video',
+        duration: optimized.duration
+      }];
+      setPreviewItems(pending);
+      setIsPreviewOpen(true);
+    } catch {
+      const pending: PendingMediaItem[] = [{
+        file,
+        previewUrl: URL.createObjectURL(file),
+        type: 'video'
+      }];
+      setPreviewItems(pending);
+      setIsPreviewOpen(true);
+    }
   };
 
   // Handle File chosen from attachment modal
@@ -211,21 +224,6 @@ export const ChatBar: React.FC = () => {
     sendMessage(command);
   };
 
-  const sendDemoVoiceNote = async () => {
-    try {
-      const demo = await createDemoAudioVoice(3);
-      await sendMedia('voice', demo.blob, demo.duration, undefined, 'demo_voice.wav');
-      notify({
-        title: 'Voice Note Sent',
-        message: 'Demo voice message delivered (3s)',
-        type: 'success',
-        duration: 2500
-      });
-    } catch (err) {
-      console.error('Failed to send demo voice:', err);
-    }
-  };
-
   const startVoiceRecording = async () => {
     try {
       await audioRecorder.startRecording();
@@ -243,11 +241,9 @@ export const ChatBar: React.FC = () => {
         title: isPermissionDenied ? 'Microphone Permission Needed' : 'Microphone Unavailable',
         message: isPermissionDenied
           ? 'Please enable microphone access in your browser or device settings.'
-          : 'Microphone hardware was not detected. Click below to send a demo voice note.',
+          : 'Microphone hardware was not detected. Please connect a microphone and try again.',
         type: 'alert',
-        duration: 5500,
-        actionLabel: 'Send Demo Voice',
-        onAction: sendDemoVoiceNote
+        duration: 4000
       });
     }
   };

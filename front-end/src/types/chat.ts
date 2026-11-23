@@ -69,6 +69,13 @@ export interface ChatMessage {
     message: string;
   };
   reactions?: MessageReaction[];
+  reaction?: {
+    message_id: string;
+    emoji: string;
+    old_emoji?: string;
+    is_removed?: boolean;
+  };
+  is_removed?: boolean;
   reply_markup?: InlineKeyboardMarkup;
 }
 
@@ -107,6 +114,8 @@ export interface OutgoingBackendPayload {
   "album"?: MediaItem[];
   "media_group_id"?: string;
   "forwarded_from"?: string;
+  "message_id"?: string;
+  "delete_for_everyone"?: boolean;
   "reaction"?: {
     message_id: string;
     emoji: string;

@@ -197,6 +197,124 @@ class ChatAPITests(TestCase):
         self.assertEqual(saved_msg.sticker_pack, "telegram_ducks")
         self.assertEqual(saved_msg.sticker_emoji, "🦆")
 
+    @patch.object(TelegramBotGateway, "set_message_reaction")
+    @patch.object(TelegramBotGateway, "notify_operator_via_websocket")
+    def test_tier1_reaction_dispatches_reaction_not_sticker(self, mock_ws_notify, mock_set_reaction):
+        """Verify reacting on a message sends setMessageReaction and does not create a message/sticker record."""
+        mock_set_reaction.return_value = {"ok": True, "result": True}
+
+        target_msg_uid = f"msg_tg_{self.customer_tg_id}_555"
+        payload = {
+            "User-ID": self.operator_id,
+            "to-user": self.customer_tg_id,
+            "message": "👍",
+            "action": "reaction",
+            "reaction": {
+                "message_id": target_msg_uid,
+                "emoji": "👍"
+            }
+        }
+
+        resp = self.client.post("/api/messages/send/", payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data.get("action"), "reaction")
+
+        # Verify no new ChatMessage record was created
+        self.assertFalse(ChatMessage.objects.filter(message="👍", action="reaction").exists())
+        self.assertFalse(ChatMessage.objects.filter(action="send_sticker").exists())
+
+        # Verify WebSocket broadcast was a reaction action
+        mock_ws_notify.assert_called_once()
+        ws_event = mock_ws_notify.call_args[0][1]
+        self.assertEqual(ws_event["action"], "reaction")
+        self.assertEqual(ws_event["messageId"], target_msg_uid)
+        self.assertEqual(ws_event["reaction"]["emoji"], "👍")
+
+    @patch.object(TelegramBotGateway, "set_message_reaction")
+    @patch.object(TelegramBotGateway, "notify_operator_via_websocket")
+    def test_tier1_reaction_removal_dispatches_empty_reaction(self, mock_ws_notify, mock_set_reaction):
+        """Verify removing a reaction dispatches empty emoji list to setMessageReaction and broadcasts is_removed."""
+        mock_set_reaction.return_value = {"ok": True, "result": True}
+
+        target_msg_uid = f"msg_tg_{self.customer_tg_id}_555"
+        payload = {
+            "User-ID": self.operator_id,
+            "to-user": self.customer_tg_id,
+            "message": "👍",
+            "action": "reaction",
+            "is_removed": True,
+            "reaction": {
+                "message_id": target_msg_uid,
+                "emoji": "👍",
+                "is_removed": True
+            }
+        }
+
+        resp = self.client.post("/api/messages/send/", payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data.get("action"), "reaction")
+
+        # Verify setMessageReaction was called with emoji=None (clearing reaction)
+        mock_set_reaction.assert_called_once()
+        call_kwargs = mock_set_reaction.call_args[1]
+        self.assertIsNone(call_kwargs.get("emoji"))
+
+        # Verify WebSocket broadcast has is_removed=True
+        mock_ws_notify.assert_called_once()
+        ws_event = mock_ws_notify.call_args[0][1]
+        self.assertTrue(ws_event.get("is_removed"))
+
+    @patch.object(TelegramBotGateway, "notify_operator_via_websocket")
+    def test_tier1_incoming_telegram_message_reaction_broadcasts_reaction(self, mock_ws_notify):
+        """Verify incoming message_reaction update from Telegram broadcasts reaction event."""
+        update = {
+            "update_id": 888999,
+            "message_reaction": {
+                "chat": {"id": self.customer_tg_id},
+                "message_id": 555,
+                "user": {"id": self.customer_tg_id},
+                "date": 1700000000,
+                "old_reaction": [],
+                "new_reaction": [{"type": "emoji", "emoji": "❤️"}]
+            }
+        }
+
+        res = TelegramBotGateway.handle_incoming_telegram_update(self.operator_id, update)
+        self.assertTrue(res)
+
+        # Verify WebSocket broadcast is reaction and target message is correct
+        mock_ws_notify.assert_called_once()
+        ws_event = mock_ws_notify.call_args[0][1]
+        self.assertEqual(ws_event["action"], "reaction")
+        self.assertEqual(ws_event["chatId"], self.customer_tg_id)
+        self.assertEqual(ws_event["messageId"], f"msg_tg_{self.customer_tg_id}_555")
+        self.assertEqual(ws_event["reaction"]["emoji"], "❤️")
+        self.assertFalse(ws_event.get("is_removed"))
+
+    @patch.object(TelegramBotGateway, "notify_operator_via_websocket")
+    def test_tier1_incoming_telegram_message_reaction_removal_broadcasts_removal(self, mock_ws_notify):
+        """Verify incoming message_reaction removal update from Telegram broadcasts removal event."""
+        update = {
+            "update_id": 888999,
+            "message_reaction": {
+                "chat": {"id": self.customer_tg_id},
+                "message_id": 555,
+                "user": {"id": self.customer_tg_id},
+                "date": 1700000000,
+                "old_reaction": [{"type": "emoji", "emoji": "❤️"}],
+                "new_reaction": []
+            }
+        }
+
+        res = TelegramBotGateway.handle_incoming_telegram_update(self.operator_id, update)
+        self.assertTrue(res)
+
+        mock_ws_notify.assert_called_once()
+        ws_event = mock_ws_notify.call_args[0][1]
+        self.assertEqual(ws_event["action"], "reaction")
+        self.assertTrue(ws_event.get("is_removed"))
+        self.assertEqual(ws_event.get("old_emoji"), "❤️")
+
     def test_tier1_media_upload_file(self):
         """Verify POST /api/media/upload/ receives multipart file and returns public URL without leaking test files."""
         with tempfile.TemporaryDirectory() as temp_dir:

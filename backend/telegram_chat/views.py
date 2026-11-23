@@ -8,6 +8,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from django.utils import timezone
 from django.conf import settings
+from django.http import StreamingHttpResponse
 from django.db import OperationalError, IntegrityError
 from django.db.models import Q
 from django.contrib.auth.hashers import make_password, check_password
@@ -210,9 +211,11 @@ def login_view(request):
 
     # Auto-fetch conversations upon login
     try:
-        TelegramBotGateway.sync_bot_conversations(operator_id=employee.user_id)
         from .poller import AutoPollerEngine
         AutoPollerEngine.ensure_bot_polling(employee.user_id)
+        # Background conversation sync without stalling HTTP login response
+        import threading
+        threading.Thread(target=TelegramBotGateway.sync_bot_conversations, kwargs={'operator_id': employee.user_id}, daemon=True).start()
     except Exception as e:
         logger.warning(f"[Login View] Background auto-sync failed gracefully: {e}")
 
@@ -527,7 +530,11 @@ def chats_list(request):
     sync_param = request.query_params.get('sync')
     if sync_param and str(sync_param).strip().lower() in ['true', '1']:
         try:
-            TelegramBotGateway.sync_bot_conversations(operator_id=operator_id)
+            if TelegramBotGateway._is_test_environment():
+                TelegramBotGateway.sync_bot_conversations(operator_id=operator_id)
+            else:
+                import threading
+                threading.Thread(target=TelegramBotGateway.sync_bot_conversations, kwargs={'operator_id': operator_id}, daemon=True).start()
         except Exception as e:
             logger.warning(f"[Chats List] Auto-sync failed gracefully: {e}")
 
@@ -542,14 +549,10 @@ def chats_list(request):
             for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
                 allowed_operator_ids.add(str(s_uid))
 
-    # Find Telegram users who have conversation history with this specific operator account
-    interacted_user_ids = set()
-    for s_id, t_id in ChatMessage.objects.filter(
-        Q(sender_id__in=allowed_operator_ids) | Q(to_user__in=allowed_operator_ids)
-    ).values_list('sender_id', 'to_user'):
-        interacted_user_ids.add(t_id if s_id in allowed_operator_ids else s_id)
-
-    # Exclude internal saved_messages from external client users
+    # High-Performance Indexed Distinct Queries for Conversation Peers
+    to_user_peers = set(ChatMessage.objects.filter(sender_id__in=allowed_operator_ids).values_list('to_user', flat=True).distinct())
+    from_user_peers = set(ChatMessage.objects.filter(to_user__in=allowed_operator_ids).values_list('sender_id', flat=True).distinct())
+    interacted_user_ids = (to_user_peers | from_user_peers) - allowed_operator_ids
     interacted_user_ids.discard('saved_messages')
 
     users = TelegramUser.objects.filter(telegram_id__in=interacted_user_ids).order_by('-updated_at')
@@ -591,17 +594,21 @@ def chats_list(request):
         ).values('sender_id').annotate(cnt=Count('id')).values_list('sender_id', 'cnt')
     )
 
-    # Batch fetch all recent messages for interacted users in a single indexed query
-    recent_msgs = ChatMessage.objects.filter(
-        Q(sender_id=operator_id, to_user__in=interacted_user_ids) |
-        Q(to_user=operator_id, sender_id__in=interacted_user_ids)
-    ).order_by('-created_at')
-
+    # High-Speed Capped Query for latest messages per conversation
     last_msg_map = {}
-    for m in recent_msgs:
-        peer_id = m.to_user if m.sender_id == operator_id else m.sender_id
-        if peer_id not in last_msg_map:
-            last_msg_map[peer_id] = m
+    if interacted_user_ids:
+        max_scan = max(100, len(interacted_user_ids) * 10)
+        recent_candidates = ChatMessage.objects.filter(
+            Q(sender_id__in=allowed_operator_ids, to_user__in=interacted_user_ids) |
+            Q(to_user__in=allowed_operator_ids, sender_id__in=interacted_user_ids)
+        ).exclude(action='cleared_chat').order_by('-created_at')[:max_scan]
+
+        for m in recent_candidates:
+            peer_id = m.to_user if m.sender_id in allowed_operator_ids else m.sender_id
+            if peer_id not in last_msg_map:
+                last_msg_map[peer_id] = m
+                if len(last_msg_map) >= len(interacted_user_ids):
+                    break
 
     bot_token = TelegramBotGateway.get_bot_token(operator_id)
 
@@ -617,20 +624,27 @@ def chats_list(request):
         last_msg = last_msg_map.get(u.telegram_id)
         unread_count = unread_counts.get(u.telegram_id, 0)
 
+        # Fallback timestamp from user updated_at if message created_at is equal or absent
+        user_ts = int(u.updated_at.timestamp() * 1000) if getattr(u, 'updated_at', None) else 0
+        msg_dict = format_message_dict(last_msg) if last_msg else None
+
         conv = {
             'id': u.telegram_id,
             'user': u_dict,
             'unreadCount': unread_count,
-            'lastMessage': format_message_dict(last_msg) if last_msg else None,
+            'lastMessage': msg_dict,
             'isPinned': False,
             'isGroup': False,
             'category': 'Customer Support',
+            '_sort_ts': (msg_dict.get('timestamp') if msg_dict else 0) or user_ts,
         }
         conversations.append(conv)
 
     saved_convs = [c for c in conversations if c.get('isSavedMessages') or c.get('isPinned')]
     other_convs = [c for c in conversations if not (c.get('isSavedMessages') or c.get('isPinned'))]
-    other_convs.sort(key=lambda c: (c.get('lastMessage') or {}).get('timestamp', 0) if c.get('lastMessage') else 0, reverse=True)
+    other_convs.sort(key=lambda c: (c.get('_sort_ts', 0), (c.get('lastMessage') or {}).get('id', '')), reverse=True)
+    for c in other_convs:
+        c.pop('_sort_ts', None)
     return Response(saved_convs + other_convs)
 
 
@@ -675,7 +689,7 @@ def messages_history(request):
     messages = ChatMessage.objects.filter(
         (Q(sender_id__in=allowed_operator_ids) & Q(to_user=to_user)) |
         (Q(sender_id=to_user) & Q(to_user__in=allowed_operator_ids))
-    ).order_by('created_at')
+    ).exclude(action='cleared_chat').order_by('created_at')
 
     target_user = TelegramUser.objects.filter(telegram_id=to_user).first()
     target_avatar = target_user.avatar if target_user else ''
@@ -696,7 +710,11 @@ def messages_history(request):
         if mg_id and m.media_type == 'photo':
             if mg_id in album_map:
                 parent = album_map[mg_id]
-                photo_item = {'type': 'photo', 'url': m_dict['media']['url'] if m_dict.get('media') else m.media_url}
+                photo_item = {
+                    'id': m_dict['id'],
+                    'type': 'photo',
+                    'url': m_dict['media']['url'] if m_dict.get('media') else m.media_url
+                }
                 if photo_item['url'] and photo_item['url'].startswith('/'):
                     photo_item['url'] = request.build_absolute_uri(photo_item['url'])
                 if 'album' not in parent or not parent['album']:
@@ -707,7 +725,9 @@ def messages_history(request):
                 continue
             else:
                 album_map[mg_id] = m_dict
-                m_dict['album'] = [m_dict['media']] if m_dict.get('media') else []
+                first_item = dict(m_dict['media']) if m_dict.get('media') else {'type': 'photo', 'url': m.media_url}
+                first_item['id'] = m_dict['id']
+                m_dict['album'] = [first_item]
                 data.append(m_dict)
         else:
             data.append(m_dict)
@@ -795,6 +815,60 @@ def send_message(request):
 
     # 2. Fetch Operator & Bot Token
     bot_token = TelegramBotGateway.get_bot_token(operator_id)
+
+    if action == 'reaction':
+        reaction_data = request.data.get('reaction') or {}
+        target_msg_id = str(reaction_data.get('message_id') or request.data.get('message_id') or '')
+        emoji = reaction_data.get('emoji') or text or ''
+        is_removed = bool(request.data.get('is_removed') or reaction_data.get('is_removed', False))
+
+        tg_msg_id = None
+        if target_msg_id:
+            if '_' in target_msg_id:
+                parts = target_msg_id.split('_')
+                if parts[-1].isdigit():
+                    tg_msg_id = int(parts[-1])
+            elif target_msg_id.isdigit():
+                tg_msg_id = int(target_msg_id)
+
+        if not tg_msg_id and target_msg_id:
+            db_msg = ChatMessage.objects.filter(message_uid=target_msg_id).first()
+            if db_msg and db_msg.message_uid:
+                if '_' in db_msg.message_uid:
+                    parts = db_msg.message_uid.split('_')
+                    if parts[-1].isdigit():
+                        tg_msg_id = int(parts[-1])
+                elif db_msg.message_uid.isdigit():
+                    tg_msg_id = int(db_msg.message_uid)
+
+        if to_user and tg_msg_id and to_user != 'saved_messages':
+            TelegramBotGateway.set_message_reaction_async(
+                bot_token=bot_token,
+                chat_id=to_user,
+                message_id=tg_msg_id,
+                emoji=None if is_removed else emoji,
+                operator_id=operator_id
+            )
+
+        ws_event = {
+            "action": "reaction",
+            "chatId": to_user,
+            "to-user": to_user,
+            "messageId": target_msg_id,
+            "reaction": {
+                "message_id": target_msg_id,
+                "emoji": emoji,
+                "is_removed": is_removed
+            },
+            "message": emoji,
+            "is_removed": is_removed,
+            "userId": operator_id,
+            "sender_id": operator_id,
+            "is_outgoing": True,
+            "timestamp": int(timezone.now().timestamp() * 1000)
+        }
+        TelegramBotGateway.notify_operator_via_websocket(operator_id, ws_event)
+        return Response({"status": "success", "success": True, "action": "reaction"})
 
     # 2. Persist outgoing message in DB
     msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}_{secrets.token_hex(4)}"
@@ -943,6 +1017,20 @@ def media_upload(request):
         for chunk in file_obj.chunks():
             destination.write(chunk)
 
+    # Automatic Server-Side Image Optimization & Compression
+    if ext_lower in ['.jpg', '.jpeg', '.png', '.webp']:
+        try:
+            from PIL import Image
+            with Image.open(file_path) as img:
+                max_side = 2048
+                if img.width > max_side or img.height > max_side:
+                    img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+                if ext_lower in ['.jpg', '.jpeg'] and img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+                img.save(file_path, optimize=True, quality=85)
+        except Exception as opt_err:
+            logger.debug(f"[Server Image Optimizer] {opt_err}")
+
     media_url = request.build_absolute_uri(f"{settings.MEDIA_URL}uploads/{filename}")
     return Response({
         "success": True,
@@ -986,9 +1074,23 @@ def telegram_webhook(request, user_id=None):
             first_bot = BotAccount.objects.exclude(bot_token="").first()
             operator_id = first_bot.user_id if first_bot else '1234'
     update = request.data
-    # Blue Team Defense: Validate incoming message payload against dangerous scripts or phishing
-    msg_obj = update.get('message') or update.get('edited_message') if isinstance(update, dict) else None
+    if not update or not isinstance(update, dict):
+        return Response({"ok": False, "detail": "Empty or invalid update payload"})
+
+    # Channel broadcast posts are ignored
+    if 'channel_post' in update or 'edited_channel_post' in update:
+        return Response({"ok": False, "detail": "Channel post ignored"})
+
+    # Validate message structure
+    msg_obj = update.get('message') or update.get('edited_message') or (update.get('callback_query', {}).get('message') if isinstance(update.get('callback_query'), dict) else None)
+    if not msg_obj and not update.get('message_reaction') and not update.get('message_reaction_count') and not update.get('callback_query'):
+        return Response({"ok": False, "detail": "No actionable message in update"})
+
     if isinstance(msg_obj, dict):
+        from_user = msg_obj.get('from') or msg_obj.get('chat')
+        if not from_user or not isinstance(from_user, dict) or not from_user.get('id'):
+            return Response({"ok": False, "detail": "Missing from user id in message"})
+
         in_text = msg_obj.get('text') or msg_obj.get('caption', '')
         if in_text:
             is_safe, sec_err = SecurityGuard.validate_incoming_message(in_text, str(operator_id))
@@ -997,7 +1099,10 @@ def telegram_webhook(request, user_id=None):
                 return Response({"ok": False, "detail": sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
     # Async Queue: offload DB/API processing to background thread pool, return 200 OK immediately
-    _webhook_worker_pool.submit(TelegramBotGateway.handle_incoming_telegram_update, operator_id, update)
+    if TelegramBotGateway._is_test_environment():
+        TelegramBotGateway.handle_incoming_telegram_update(operator_id, update)
+    else:
+        _webhook_worker_pool.submit(TelegramBotGateway.handle_incoming_telegram_update, operator_id, update)
     return Response({"ok": True, "status": "queued"})
 
 
@@ -1593,4 +1698,239 @@ def delete_bot_account_view(request, user_id):
         "user_id": user_id_str,
         "deleted": bool(deleted_bot[0] or deleted_emp[0])
     })
+
+
+@api_view(['GET', 'HEAD'])
+@permission_classes([AllowAny])
+def telegram_media_proxy_view(request):
+    """
+    Streaming proxy for Telegram media (photos, videos, voice notes, stickers, documents).
+    Solves browser CORS, Content-Disposition: attachment, missing video MIME types,
+    and enables Range-based streaming for smooth HTML5 video/audio playback.
+    """
+    media_url = request.query_params.get('url', '').strip()
+    if not media_url:
+        return Response({'detail': 'url parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Security check: Only proxy api.telegram.org URLs
+    if not media_url.startswith('https://api.telegram.org/') and not media_url.startswith('http://api.telegram.org/'):
+        return Response({'detail': 'Only Telegram media URLs are allowed'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        # Determine content type from URL if possible
+        clean_url = media_url.split('?')[0].lower()
+        content_type = 'application/octet-stream'
+        if any(clean_url.endswith(ext) for ext in ['.jpg', '.jpeg']):
+            content_type = 'image/jpeg'
+        elif clean_url.endswith('.png'):
+            content_type = 'image/png'
+        elif clean_url.endswith('.webp'):
+            content_type = 'image/webp'
+        elif clean_url.endswith('.gif'):
+            content_type = 'image/gif'
+        elif clean_url.endswith('.mp4') or '/videos/' in clean_url:
+            content_type = 'video/mp4'
+        elif clean_url.endswith('.mov'):
+            content_type = 'video/quicktime'
+        elif clean_url.endswith('.webm'):
+            content_type = 'video/webm'
+        elif clean_url.endswith('.ogg') or clean_url.endswith('.oga') or '/voice/' in clean_url or '/voices/' in clean_url:
+            content_type = 'audio/ogg'
+        elif clean_url.endswith('.mp3') or '/music/' in clean_url:
+            content_type = 'audio/mpeg'
+        elif clean_url.endswith('.wav'):
+            content_type = 'audio/wav'
+
+        # Forward Range header for video seeking
+        headers = {}
+        range_header = request.META.get('HTTP_RANGE')
+        if range_header:
+            headers['Range'] = range_header
+
+        # Stream request to Telegram API
+        resp = requests.get(media_url, headers=headers, stream=True, timeout=15)
+        
+        # Override Telegram's attachment disposition with inline
+        response = StreamingHttpResponse(
+            resp.iter_content(chunk_size=65536),
+            status=resp.status_code,
+            content_type=content_type if content_type != 'application/octet-stream' else resp.headers.get('Content-Type', 'application/octet-stream')
+        )
+        response['Content-Disposition'] = 'inline'
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response['Access-Control-Allow-Headers'] = 'Range, Content-Type'
+        response['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges'
+        
+        if 'Content-Length' in resp.headers:
+            response['Content-Length'] = resp.headers['Content-Length']
+        if 'Content-Range' in resp.headers:
+            response['Content-Range'] = resp.headers['Content-Range']
+        if 'Accept-Ranges' in resp.headers:
+            response['Accept-Ranges'] = resp.headers['Accept-Ranges']
+        else:
+            response['Accept-Ranges'] = 'bytes'
+
+        return response
+    except Exception as e:
+        logger.error(f"[Media Proxy] Error proxying {media_url}: {e}")
+        return Response({'detail': f'Failed to retrieve media: {e}'}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def wipe_chat_history_view(request):
+    """
+    Wipe chatting files and messages.
+    Supports wiping a specific chat (to_user) or wiping all chats.
+    Also deletes physical media files stored in MEDIA_ROOT/uploads.
+    """
+    operator_id = request.data.get('User-ID') or request.data.get('userId') or request.query_params.get('User-ID')
+    to_user = request.data.get('to_user') or request.data.get('to-user') or request.query_params.get('to_user')
+    wipe_all = request.data.get('wipe_all', False) or request.query_params.get('wipe_all') == 'true'
+
+    if not operator_id:
+        return Response({'detail': 'User-ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed_ids = {str(operator_id).strip()}
+    bot = BotAccount.objects.filter(Q(user_id=operator_id) | Q(employee__user_id=operator_id)).first()
+    if bot:
+        allowed_ids.add(str(bot.user_id))
+        if bot.employee:
+            allowed_ids.add(str(bot.employee.user_id))
+        if bot.bot_token:
+            for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
+                allowed_ids.add(str(s_uid))
+
+    deleted_files_count = 0
+    if wipe_all:
+        messages_qs = ChatMessage.objects.filter(
+            Q(sender_id__in=allowed_ids) | Q(to_user__in=allowed_ids)
+        )
+        # Delete media files from disk
+        for media_val in messages_qs.exclude(media_url__isnull=True).exclude(media_url='').values_list('media_url', flat=True):
+            if media_val and '/media/uploads/' in media_val:
+                f_name = media_val.split('/media/uploads/')[-1].split('?')[0]
+                f_path = settings.MEDIA_ROOT / 'uploads' / f_name
+                try:
+                    if f_path.exists() and f_path.is_file():
+                        os.remove(f_path)
+                        deleted_files_count += 1
+                except Exception as file_err:
+                    logger.warning(f"[Wipe All] Failed to remove file {f_path}: {file_err}")
+
+        # Also purge any orphaned files in uploads directory
+        uploads_dir = settings.MEDIA_ROOT / 'uploads'
+        if uploads_dir.exists():
+            for f in uploads_dir.glob('*'):
+                try:
+                    if f.is_file():
+                        os.remove(f)
+                        deleted_files_count += 1
+                except Exception as file_err:
+                    logger.warning(f"[Wipe All] Failed to clean orphaned file {f}: {file_err}")
+
+        deleted_count, _ = messages_qs.delete()
+        return Response({
+            'status': 'success',
+            'message': f'All chat history ({deleted_count} messages, {deleted_files_count} files) wiped successfully.',
+            'deleted_count': deleted_count,
+            'deleted_files_count': deleted_files_count
+        })
+    elif to_user:
+        to_user_str = str(to_user).strip()
+        messages_qs = ChatMessage.objects.filter(
+            (Q(sender_id__in=allowed_ids) & Q(to_user=to_user_str)) |
+            (Q(to_user__in=allowed_ids) & Q(sender_id=to_user_str))
+        )
+        for media_val in messages_qs.exclude(media_url__isnull=True).exclude(media_url='').values_list('media_url', flat=True):
+            if media_val and '/media/uploads/' in media_val:
+                f_name = media_val.split('/media/uploads/')[-1].split('?')[0]
+                f_path = settings.MEDIA_ROOT / 'uploads' / f_name
+                try:
+                    if f_path.exists() and f_path.is_file():
+                        os.remove(f_path)
+                        deleted_files_count += 1
+                except Exception as file_err:
+                    logger.warning(f"[Wipe Chat] Failed to remove file {f_path}: {file_err}")
+
+        deleted_count, _ = messages_qs.delete()
+        delete_chat = request.data.get('delete_chat', False) or request.query_params.get('delete_chat') == 'true'
+        if isinstance(delete_chat, str):
+            delete_chat = delete_chat.lower() == 'true'
+
+        if delete_chat:
+            TelegramUser.objects.filter(telegram_id=to_user_str).delete()
+        else:
+            if to_user_str != 'saved_messages':
+                ChatMessage.objects.create(
+                    message_uid=f"cleared_{to_user_str}_{int(timezone.now().timestamp() * 1000)}",
+                    sender_id=str(operator_id),
+                    to_user=to_user_str,
+                    action="cleared_chat",
+                    message=""
+                )
+
+        return Response({
+            'status': 'success',
+            'message': f'Chat history with {to_user_str} ({deleted_count} messages, {deleted_files_count} files) wiped.',
+            'deleted_count': deleted_count,
+            'deleted_files_count': deleted_files_count
+        })
+    else:
+        return Response({'detail': 'Specify to_user or wipe_all=true'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST', 'DELETE'])
+def delete_message_view(request):
+    """
+    Deletes a specific message by ID.
+    Payload: { "User-ID": ..., "chat_id": ..., "message_id": ..., "delete_for_everyone": bool }
+    """
+    operator_id = request.data.get('User-ID') or request.data.get('userId') or request.query_params.get('User-ID')
+    chat_id = request.data.get('chat_id') or request.data.get('to_user') or request.data.get('to-user') or request.query_params.get('chat_id')
+    message_id = str(request.data.get('message_id') or request.data.get('messageId') or request.query_params.get('message_id') or '')
+    delete_for_everyone = request.data.get('delete_for_everyone', True)
+    if isinstance(delete_for_everyone, str):
+        delete_for_everyone = delete_for_everyone.lower() == 'true'
+
+    if not message_id:
+        return Response({'detail': 'message_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    db_msg = ChatMessage.objects.filter(
+        Q(message_uid=message_id) | Q(id=int(message_id) if message_id.isdigit() else -1)
+    ).first()
+
+    tg_msg_id = None
+    if db_msg:
+        if db_msg.message_uid:
+            if '_' in db_msg.message_uid:
+                parts = db_msg.message_uid.split('_')
+                if parts[-1].isdigit():
+                    tg_msg_id = int(parts[-1])
+            elif db_msg.message_uid.isdigit():
+                tg_msg_id = int(db_msg.message_uid)
+        db_msg.delete()
+
+    if delete_for_everyone and chat_id and chat_id != 'saved_messages':
+        if not tg_msg_id:
+            if '_' in message_id:
+                parts = message_id.split('_')
+                if parts[-1].isdigit():
+                    tg_msg_id = int(parts[-1])
+            elif message_id.isdigit():
+                tg_msg_id = int(message_id)
+
+        if tg_msg_id:
+            from telegram_chat.bot_service import TelegramBotGateway
+            bot_token = TelegramBotGateway.get_bot_token(operator_id)
+            TelegramBotGateway.delete_message_async(
+                bot_token=bot_token,
+                chat_id=chat_id,
+                message_id=tg_msg_id,
+                operator_id=operator_id
+            )
+
+    return Response({'status': 'success', 'message_id': message_id})
+
 

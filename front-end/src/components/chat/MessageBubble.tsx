@@ -23,12 +23,14 @@ import {
 import { PREINSTALLED_STICKER_PACKS } from '../../assets/stickers/stickerPacks';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useChat } from '../../contexts/ChatContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { ChatMessage, MediaItem } from '../../types/chat';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer';
 import { formatFileSize } from '../../utils/imageCompressor';
 import { resolveMediaUrl } from '../../services/api';
 import { PhotoLightboxModal, PhotoItem } from './PhotoLightboxModal';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -40,6 +42,7 @@ const QUICK_REACTIONS = ['❤️', '👍', '👎', '🔥', '😂', '🎉', '👏
 const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForward }) => {
   const { theme, settings } = useTheme();
   const { saveMessageToSaved, activeChat, toggleReaction, deleteMessage } = useChat();
+  const { account } = useAuth();
   const { notify } = useNotification();
 
   const [lightboxPhotos, setLightboxPhotos] = useState<PhotoItem[] | null>(null);
@@ -49,6 +52,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const isGold = theme === 'black-gold';
   const isOutgoing = message.isOutgoing;
@@ -122,8 +126,13 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = (deleteForEveryone: boolean) => {
+    setShowDeleteModal(false);
     if (activeChat) {
-      deleteMessage(activeChat.id, message.id);
+      deleteMessage(activeChat.id, message.id, deleteForEveryone);
     }
   };
 
@@ -303,16 +312,16 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
   const renderReactionBadges = () => {
     if (!message.reactions || message.reactions.length === 0) return null;
     return (
-      <div className="flex flex-wrap gap-1 mt-1">
+      <div className="flex flex-wrap gap-1 mt-1 animate-pop-in">
         {message.reactions.map((r) => {
           const hasUserReacted = Boolean(
-            activeChat && r.users.includes(activeChat.user.id)
+            account?.userId && r.users.includes(account.userId)
           );
           return (
             <button
               key={r.emoji}
               onClick={(e) => handleSelectReaction(r.emoji, e)}
-              className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border transition active:scale-95 ${
+              className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border transition active:scale-95 animate-pop-in ${
                 hasUserReacted
                   ? 'bg-[var(--color-accent)]/20 border-[var(--color-accent)]/50 text-white'
                   : 'bg-black/60 border-white/10 text-white/90 hover:bg-white/10'
@@ -389,6 +398,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
       </div>
     );
   };
+
+  // Standalone reaction events are rendered on their parent message, never as independent bubbles
+  if (message.action === 'reaction') {
+    return null;
+  }
 
   // 1. STICKER MESSAGE
   if (message.sticker || message.action === 'send_sticker') {
@@ -514,7 +528,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
                   onClick={() => {
                     setLightboxPhotos(
                       photos.map((p) => ({
-                        url: p.url,
+                        url: resolveMediaUrl(p.url),
                         caption: (p as any).caption || (message.message && !message.message.startsWith('[') ? message.message : undefined)
                       }))
                     );
@@ -523,10 +537,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
                   className={`relative cursor-pointer group/img overflow-hidden bg-black/40 ${count === 3 && idx === 0 ? 'col-span-2 aspect-[2/1]' : 'aspect-square'}`}
                 >
                   <img
-                    src={p.url}
+                    src={resolveMediaUrl(p.url)}
                     alt=""
                     loading="lazy"
                     decoding="async"
+                    crossOrigin="anonymous"
                     className="w-full h-full object-cover transition-transform duration-200 group-hover/img:scale-105"
                   />
                   {count > 4 && idx === 3 && (
@@ -603,7 +618,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
             <div
               className="relative group cursor-pointer bg-black/40 flex items-center justify-center overflow-hidden"
               onClick={() => {
-                setLightboxPhotos([{ url: message.media!.url, caption: hasCaption ? message.message : undefined }]);
+                setLightboxPhotos([{ url: resolveMediaUrl(message.media!.url), caption: hasCaption ? message.message : undefined }]);
                 setLightboxIndex(0);
               }}
             >
@@ -611,10 +626,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
                 <div className="absolute inset-0 min-h-[160px] skeleton-shimmer" />
               )}
               <img
-                src={message.media.url}
+                src={resolveMediaUrl(message.media.url)}
                 alt={message.message || 'Photo'}
                 loading="lazy"
                 decoding="async"
+                crossOrigin="anonymous"
                 onLoad={() => setImgLoaded(true)}
                 className={`max-w-full max-h-[65vh] w-auto h-auto object-contain transition-all duration-300 ${
                   imgLoaded ? 'opacity-100' : 'opacity-0'
@@ -691,22 +707,25 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
             {videoError ? (
               <div className="p-6 bg-black/60 flex flex-col items-center justify-center text-center">
                 <AlertCircle className="w-8 h-8 text-amber-400 mb-2" />
-                <div className="text-xs font-semibold text-white">Video format not playable in browser</div>
+                <div className="text-xs font-semibold text-white">Video format not directly playable in browser</div>
                 <a
-                  href={message.media.url}
+                  href={resolveMediaUrl(message.media.url)}
                   download={message.media.fileName || 'video.mp4'}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="mt-2.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-semibold text-white flex items-center gap-1.5 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download Video</span>
+                  <span>Download / Open Video</span>
                 </a>
               </div>
             ) : (
               <video
-                src={message.media.url}
+                src={resolveMediaUrl(message.media.url)}
                 controls
                 playsInline
                 preload="metadata"
+                crossOrigin="anonymous"
                 onError={() => setVideoError(true)}
                 className="w-full max-h-72 object-cover bg-black"
               />
@@ -867,6 +886,18 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
         {/* Selected Emoji Reactions Floating Badges */}
         {renderReactionBadges()}
       </div>
+
+      {/* Telegram-style Delete Message Confirmation Modal */}
+      {showDeleteModal && (
+        <DeleteConfirmationModal
+          isOpen={showDeleteModal}
+          mode="message"
+          targetName={activeChat?.user?.firstName || 'User'}
+          isSavedMessages={Boolean(activeChat?.isSavedMessages)}
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
     </div>
   );
 };

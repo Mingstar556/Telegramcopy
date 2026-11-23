@@ -1,6 +1,5 @@
 import { BotAccount, LoginCredentials, GenerateAccountsPayload, GenerateAccountsResponse, GeneratedAccount } from '../types/auth';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload } from '../types/chat';
-import { INITIAL_MOCK_CONVERSATIONS, INITIAL_MOCK_MESSAGES, MOCK_BOT_USER } from './mockData';
 
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
@@ -44,14 +43,23 @@ export function resolveMediaUrl(url?: string): string {
   if (!url) return '';
   const trimmed = url.trim();
   if (!trimmed) return '';
-  if (
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('blob:') ||
-    trimmed.startsWith('data:')
-  ) {
+
+  // Local object blobs and base64 data URIs
+  if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
     return trimmed;
   }
+
+  // Telegram Media API URLs (videos, photos, voices, files)
+  // Proxy them through Django backend endpoint to bypass browser CORS and force inline streaming playback
+  if (trimmed.includes('api.telegram.org/file/')) {
+    const base = getApiBaseUrl().replace(/\/+$/, '');
+    return `${base}/api/media/proxy/?url=${encodeURIComponent(trimmed)}`;
+  }
+
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
   const base = getApiBaseUrl().replace(/\/+$/, '');
   const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   return `${base}${path}`;
@@ -66,16 +74,6 @@ export interface HealthCheckResult {
 }
 
 class ApiService {
-  private useMock: boolean = false;
-
-  public setMockMode(enabled: boolean) {
-    this.useMock = enabled;
-  }
-
-  public isMockMode(): boolean {
-    return this.useMock;
-  }
-
   public getBaseUrl(): string {
     return getApiBaseUrl();
   }
@@ -84,15 +82,6 @@ class ApiService {
    * Check connection to Django backend and active database probe
    */
   async checkHealth(): Promise<HealthCheckResult> {
-    if (this.useMock) {
-      return { 
-        status: 'ok', 
-        database: 'connected', 
-        message: 'Running in Local Mock Mode',
-        serverUrl: 'mock://local'
-      };
-    }
-
     const base = this.getBaseUrl();
     try {
       const controller = new AbortController();
@@ -139,32 +128,6 @@ class ApiService {
    * User logs in with User-ID and Password assigned to the Telegram Bot
    */
   async login(creds: LoginCredentials): Promise<{ account: BotAccount; token: string }> {
-    if (this.useMock) {
-      // Simulate network request
-      await new Promise(r => setTimeout(r, 600));
-
-      const isTestAccount = creds.userId === '1234' && creds.password === '1234';
-      const isLegacyTest = creds.userId === 'bot_89201948' && creds.password === 'django_secret_pass';
-
-      if (!isTestAccount && !isLegacyTest) {
-        throw new Error('INVALID_CREDENTIALS');
-      }
-
-      const botName = isTestAccount ? 'Telegram Operator (1234)' : MOCK_BOT_USER.botName;
-      const botUsername = isTestAccount ? 'test_bot_1234' : MOCK_BOT_USER.botUsername;
-
-      const account: BotAccount = {
-        userId: creds.userId,
-        botName: botName,
-        botUsername: botUsername,
-        avatar: MOCK_BOT_USER.avatar,
-        description: 'Telegram bot operator session actively connected to Python/Django backend.',
-        assignedToken: 'tg_sec_token_' + Math.random().toString(36).substring(2, 10),
-        connectedAt: new Date().toLocaleTimeString()
-      };
-      return { account, token: account.assignedToken! };
-    }
-
     const base = this.getBaseUrl();
     const res = await fetch(`${base}/api/auth/login/`, {
       method: 'POST',
@@ -199,14 +162,6 @@ class ApiService {
    * Request / Check bot user data from backend
    */
   async checkUserData(userId: string, token?: string): Promise<BotAccount> {
-    if (this.useMock) {
-      await new Promise(r => setTimeout(r, 200));
-      return {
-        ...MOCK_BOT_USER,
-        userId: userId || MOCK_BOT_USER.userId
-      };
-    }
-
     const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -234,10 +189,6 @@ class ApiService {
    * Change bot profile photo on Telegram and backend
    */
   async updateBotAvatar(file: File | Blob, token?: string, userId?: string): Promise<{ success: boolean; avatarUrl: string }> {
-    if (this.useMock) {
-      const url = URL.createObjectURL(file);
-      return { success: true, avatarUrl: url };
-    }
     const base = this.getBaseUrl();
     const formData = new FormData();
     formData.append('avatar', file);
@@ -268,9 +219,6 @@ class ApiService {
    * Remove bot profile photo
    */
   async removeBotAvatar(token?: string, userId?: string): Promise<{ success: boolean }> {
-    if (this.useMock) {
-      return { success: true };
-    }
     const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -293,10 +241,6 @@ class ApiService {
    * Fetch chat list from Django backend with optional Telegram auto-sync
    */
   async fetchConversations(userId: string, token?: string, sync?: boolean): Promise<ChatConversation[]> {
-    if (this.useMock) {
-      return INITIAL_MOCK_CONVERSATIONS;
-    }
-
     const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -332,10 +276,6 @@ class ApiService {
    * Fetch message history for a specific conversation
    */
   async fetchMessages(userId: string, toUser: string, token?: string): Promise<ChatMessage[]> {
-    if (this.useMock) {
-      return INITIAL_MOCK_MESSAGES[toUser] || [];
-    }
-
     const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -370,14 +310,6 @@ class ApiService {
    * { "User-ID": ..., "to-user": ..., "message": ..., "action": ... }
    */
   async sendMessage(payload: OutgoingBackendPayload, token?: string): Promise<{ success: boolean; messageId?: string }> {
-    console.log('[API Outgoing Payload]', payload);
-
-    if (this.useMock) {
-      // Return simulated success
-      await new Promise(r => setTimeout(r, 150));
-      return { success: true, messageId: 'msg_' + Date.now() };
-    }
-
     const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -401,11 +333,6 @@ class ApiService {
    * Upload media file (photo, video, voice note) to backend
    */
   async uploadMedia(file: File | Blob, filename: string, token?: string): Promise<{ success: boolean; url: string }> {
-    if (this.useMock) {
-      const url = URL.createObjectURL(file);
-      return { success: true, url };
-    }
-
     try {
       const base = this.getBaseUrl();
       const formData = new FormData();
@@ -448,13 +375,6 @@ class ApiService {
     caption?: string;
     action?: string;
   }, token?: string): Promise<{ success: boolean; messageId?: string }> {
-    console.log('[API sendPhoto Payload]', payload);
-
-    if (this.useMock) {
-      await new Promise(r => setTimeout(r, 150));
-      return { success: true, messageId: 'msg_' + Date.now() };
-    }
-
     const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -499,43 +419,6 @@ class ApiService {
    * Generates web operator accounts from Telegram bot keys
    */
   async generateBotAccounts(payload: GenerateAccountsPayload): Promise<GenerateAccountsResponse> {
-    if (this.useMock) {
-      await new Promise(r => setTimeout(r, 700));
-      const tokens = payload.tokens && payload.tokens.length > 0 
-        ? payload.tokens 
-        : Array.from({ length: payload.count || 1 }, (_, i) => `919739791${i}:AAHC1HOhNvV-exC9uzRBsHZ6BJbmTFEoXyo`);
-
-      const accounts: GeneratedAccount[] = tokens.map((tok, idx) => {
-        const botId = tok.split(':')[0] || `${idx + 1}`;
-        const uId = payload.idPrefix && payload.idPrefix !== 'auto'
-          ? `${payload.idPrefix}_${idx + 1}`
-          : `operator_${botId}`;
-        const pass = payload.passwordType === 'custom' && payload.customPassword
-          ? payload.customPassword
-          : `BotPass_${Math.floor(1000 + Math.random() * 9000)}`;
-
-        return {
-          userId: uId,
-          password: pass,
-          botName: `Customer Bot ${idx + 1}`,
-          botUsername: `bot_${botId}`,
-          botToken: tok,
-          botTokenMasked: `${tok.slice(0, 4)}...${tok.slice(-4)}`,
-          status: 'created',
-          telegramVerified: true,
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-        };
-      });
-
-      return {
-        status: 'success',
-        message: `Successfully generated ${accounts.length} web operator accounts.`,
-        totalRequested: tokens.length,
-        totalGenerated: accounts.length,
-        accounts
-      };
-    }
-
     const base = this.getBaseUrl();
     const res = await fetch(`${base}/api/admin/generate-accounts/`, {
       method: 'POST',
@@ -578,10 +461,46 @@ class ApiService {
     };
   }
 
-  async listBotAccounts(): Promise<GeneratedAccount[]> {
-    if (this.useMock) {
-      return [];
+  async deleteMessage(userId: string, chatId: string, messageId: string, deleteForEveryone: boolean = true): Promise<{ success: boolean }> {
+    const base = this.getBaseUrl();
+    try {
+      const res = await fetch(`${base}/api/messages/delete/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          "User-ID": userId,
+          "chat_id": chatId,
+          "message_id": messageId,
+          "delete_for_everyone": deleteForEveryone
+        })
+      });
+      return { success: res.ok };
+    } catch {
+      return { success: false };
     }
+  }
+
+  async wipeChatHistory(userId: string, toUser?: string, wipeAll?: boolean, deleteChat?: boolean): Promise<{ success: boolean; deletedCount?: number }> {
+    const base = this.getBaseUrl();
+    const res = await fetch(`${base}/api/chats/wipe/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        "User-ID": userId,
+        "to_user": toUser,
+        "wipe_all": wipeAll ?? false,
+        "delete_chat": deleteChat ?? false
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to wipe chat history');
+    }
+    const data = await res.json();
+    return { success: true, deletedCount: data.deleted_count };
+  }
+
+  async listBotAccounts(): Promise<GeneratedAccount[]> {
     const base = this.getBaseUrl();
     const res = await fetch(`${base}/api/admin/bot-accounts/`);
     if (!res.ok) return [];

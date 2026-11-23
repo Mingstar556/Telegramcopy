@@ -87,16 +87,23 @@ class WebSocketService {
           const rawAlbum = data.album;
           const incomingMessage: ChatMessage = {
             id: data.id || 'ws_' + Date.now(),
-            senderId: isOutgoing ? userId : (data["sender_id"] || data["from_user"] || data["to-user"]),
+            senderId: isOutgoing ? userId : (data["sender_id"] || data["from_user"] || data["to-user"] || data.userId),
             senderName: data.sender_name,
             senderAvatar: resolveMediaUrl(data.sender_avatar || data.senderAvatar || data.avatar),
-            toUser: isOutgoing ? (data["to-user"] || data["to_user"]) : (data["User-ID"] || userId),
+            toUser: isOutgoing ? (data["to-user"] || data["to_user"] || data.chatId) : (data["User-ID"] || userId || data.chatId),
             message: data.message || '',
             timestamp: data.timestamp ? Number(data.timestamp) : Date.now(),
             isOutgoing,
             status: data.status || 'delivered',
             action: data.action,
-            sticker: data.sticker,
+            reaction: data.reaction || (data.messageId ? {
+              message_id: data.messageId,
+              emoji: data.emoji || data.message || '',
+              old_emoji: data.old_emoji || data.oldEmoji,
+              is_removed: Boolean(data.is_removed || data.isRemoved)
+            } : undefined),
+            is_removed: Boolean(data.is_removed || data.isRemoved || data.reaction?.is_removed),
+            sticker: data.action === 'reaction' ? undefined : data.sticker,
             media: rawMedia ? {
               ...rawMedia,
               url: resolveMediaUrl(rawMedia.url)

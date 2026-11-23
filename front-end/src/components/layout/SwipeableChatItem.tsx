@@ -1,8 +1,10 @@
-import React, { useRef, useState } from 'react';
-import { Archive, Bot, Pin, Bookmark, BellOff } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Archive, Bot, Pin, Bookmark, BellOff, Bell, Eraser, Trash2 } from 'lucide-react';
 import { ChatConversation } from '../../types/chat';
 import { Avatar } from '../common/Avatar';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useChat } from '../../contexts/ChatContext';
+import { DeleteConfirmationModal, DeleteModalMode } from '../chat/DeleteConfirmationModal';
 
 interface SwipeableChatItemProps {
   chat: ChatConversation;
@@ -10,6 +12,7 @@ interface SwipeableChatItemProps {
   onSelect: () => void;
   onArchive: (chatId: string) => void;
   onUnarchive?: (chatId: string) => void;
+  onTogglePin?: (chatId: string) => void;
   isArchivedMode?: boolean;
   isUnseen?: boolean;
 }
@@ -20,6 +23,7 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
   onSelect,
   onArchive,
   onUnarchive,
+  onTogglePin,
   isArchivedMode = false,
   isUnseen: isUnseenProp
 }) => {
@@ -29,6 +33,44 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
   // Secondary glowing state: active when someone text the bot and user hasn't seen that person
   const isUnseen = !isActive && (isUnseenProp ?? (chat.unreadCount > 0 && !chat.lastMessage?.isOutgoing));
 
+  const { togglePinChat, toggleMuteChat, clearChat, deleteChat } = useChat();
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [deleteModalMode, setDeleteModalMode] = useState<DeleteModalMode | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenuPos(null);
+      }
+    };
+    if (contextMenuPos) {
+      window.addEventListener('click', handleGlobalClick);
+      window.addEventListener('contextmenu', handleGlobalClick);
+    }
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('contextmenu', handleGlobalClick);
+    };
+  }, [contextMenuPos]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenuPos({
+      x: Math.min(e.clientX, window.innerWidth - 220),
+      y: Math.min(e.clientY, window.innerHeight - 220)
+    });
+  };
+
+  const handleConfirmDeleteModal = (deleteForEveryone: boolean) => {
+    if (deleteModalMode === 'clear_history') {
+      clearChat(chat.id, deleteForEveryone);
+    } else if (deleteModalMode === 'delete_chat') {
+      deleteChat(chat.id, deleteForEveryone);
+    }
+    setDeleteModalMode(null);
+  };
   const [translateX, setTranslateX] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -186,11 +228,12 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
 
       {/* Front Foreground Chat Item */}
       <div
+        onContextMenu={handleContextMenu}
         style={{
           transform: `translate3d(${translateX}px, 0, 0)`,
           transition: isSwiping ? 'none' : 'transform 240ms cubic-bezier(0.16, 1, 0.3, 1), background-color 200ms ease, box-shadow 300ms ease, border-color 300ms ease'
         }}
-        className={`relative z-10 w-full p-2.5 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all duration-300 ${
+        className={`relative z-10 w-full p-2.5 rounded-2xl flex items-center gap-3 text-left cursor-pointer transition-all duration-300 group ${
           isActive
             ? isGold
               ? 'bg-[#1c180e] border border-[#e5b842]/35 shadow-sm'
@@ -278,15 +321,39 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {chat.isPinned && (
-                <Pin
-                  className={`w-3 h-3 rotate-45 ${
-                    isGold
-                      ? 'text-[#e5b842] fill-[#e5b842]'
-                      : 'text-[var(--color-accent)] fill-[var(--color-accent)]'
-                  }`}
-                />
-              )}
+              {chat.isPinned ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!chat.isSavedMessages && onTogglePin) {
+                      onTogglePin(chat.id);
+                    }
+                  }}
+                  className="p-1 rounded-md hover:bg-white/10 transition btn-press"
+                  title={chat.isSavedMessages ? 'Saved Messages is pinned by default' : 'Click to unpin chat'}
+                >
+                  <Pin
+                    className={`w-3.5 h-3.5 rotate-45 ${
+                      isGold
+                        ? 'text-[#e5b842] fill-[#e5b842]'
+                        : 'text-[var(--color-accent)] fill-[var(--color-accent)]'
+                    }`}
+                  />
+                </button>
+              ) : onTogglePin && !chat.isSavedMessages ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePin(chat.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-60 hover:!opacity-100 p-1 rounded-md hover:bg-white/10 transition btn-press"
+                  title="Pin chat to top"
+                >
+                  <Pin className="w-3.5 h-3.5 rotate-45 text-[var(--color-text-muted)]" />
+                </button>
+              ) : null}
 
               {chat.unreadCount > 0 && (
                 <span
@@ -305,6 +372,110 @@ const SwipeableChatItemComponent: React.FC<SwipeableChatItemProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Telegram-style Right Click Context Menu */}
+      {contextMenuPos && (
+        <div
+          ref={contextMenuRef}
+          style={{
+            position: 'fixed',
+            left: `${contextMenuPos.x}px`,
+            top: `${contextMenuPos.y}px`,
+            zIndex: 9999
+          }}
+          className={`w-52 rounded-2xl p-1.5 shadow-2xl border backdrop-blur-2xl animate-pop-in select-none ${
+            isGold
+              ? 'bg-[#0f0e0a]/95 border-[#38301a] text-[#f5f2eb] shadow-[0_12px_40px_rgba(0,0,0,0.85)]'
+              : 'bg-[#12141a]/95 border-white/10 text-white shadow-2xl'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-3.5 py-1.5 mb-1 border-b border-white/5">
+            <div className="text-xs font-semibold truncate text-[var(--color-text-main)]">
+              {fullName}
+            </div>
+          </div>
+
+          {/* Pin / Unpin */}
+          {!chat.isSavedMessages && (
+            <button
+              onClick={() => {
+                togglePinChat(chat.id);
+                setContextMenuPos(null);
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl hover:bg-white/[0.06] transition-colors btn-press text-left"
+            >
+              <Pin
+                className={`w-4 h-4 ${
+                  chat.isPinned
+                    ? isGold
+                      ? 'text-[#e5b842] fill-[#e5b842]'
+                      : 'text-[var(--color-accent)] fill-[var(--color-accent)]'
+                    : 'text-[var(--color-text-muted)]'
+                }`}
+              />
+              <span>{chat.isPinned ? 'Unpin from Top' : 'Pin to Top'}</span>
+            </button>
+          )}
+
+          {/* Mute / Unmute */}
+          <button
+            onClick={() => {
+              toggleMuteChat(chat.id);
+              setContextMenuPos(null);
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl hover:bg-white/[0.06] transition-colors btn-press text-left"
+          >
+            {chat.isMuted ? (
+              <Bell className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <BellOff className="w-4 h-4 text-[var(--color-text-muted)]" />
+            )}
+            <span>{chat.isMuted ? 'Unmute' : 'Mute'}</span>
+          </button>
+
+          <div className="my-1 border-t border-white/5" />
+
+          {/* Clear History */}
+          <button
+            onClick={() => {
+              setContextMenuPos(null);
+              setDeleteModalMode('clear_history');
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl hover:bg-amber-500/10 text-amber-400/90 hover:text-amber-300 transition-colors btn-press text-left"
+          >
+            <Eraser className="w-4 h-4" />
+            <span>Clear History</span>
+          </button>
+
+          {/* Delete Chat */}
+          {!chat.isSavedMessages && (
+            <button
+              onClick={() => {
+                setContextMenuPos(null);
+                setDeleteModalMode('delete_chat');
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-xl hover:bg-red-500/10 text-red-400/90 hover:text-red-300 transition-colors btn-press text-left"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Chat</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Delete / Clear History Confirmation Modal */}
+      {deleteModalMode && (
+        <DeleteConfirmationModal
+          isOpen={Boolean(deleteModalMode)}
+          mode={deleteModalMode}
+          targetName={fullName}
+          isSavedMessages={Boolean(chat.isSavedMessages)}
+          onClose={() => setDeleteModalMode(null)}
+          onConfirm={handleConfirmDeleteModal}
+        />
+      )}
     </div>
   );
 };

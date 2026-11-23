@@ -34,7 +34,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return False
 
     @database_sync_to_async
-    def save_outgoing_message(self, operator_id: str, to_user: str, text: str, action: str, sticker: dict = None, media: dict = None):
+    def save_outgoing_message(self, operator_id: str, to_user: str, text: str, action: str, sticker: dict = None, media: dict = None, album: list = None):
         from telegram_chat.models import ChatMessage
         msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}_{secrets.token_hex(4)}"
         chat_msg = ChatMessage.objects.create(
@@ -45,8 +45,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             action=action or 'send_message',
             is_outgoing=True,
             status='sent',
-            media_type='sticker' if action == 'send_sticker' else (media.get('type') if isinstance(media, dict) else None),
-            media_url=(sticker.get('url') if isinstance(sticker, dict) else None) or (media.get('url') if isinstance(media, dict) else None),
+            media_type='sticker' if action == 'send_sticker' else (media.get('type') if isinstance(media, dict) else ('photo' if album else None)),
+            media_url=(sticker.get('url') if isinstance(sticker, dict) else None) or (media.get('url') if isinstance(media, dict) else ((album[0].get('url') if album and isinstance(album[0], dict) else None))),
             media_filename=media.get('fileName') or media.get('file_name') if isinstance(media, dict) else None,
             media_duration=media.get('duration', 0) if isinstance(media, dict) else 0,
             sticker_id=sticker.get('id') if isinstance(sticker, dict) else None,
@@ -161,6 +161,144 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         action = payload.get('action', 'send_message')
 
+        # Handle reaction action: dispatch setMessageReaction to Telegram and broadcast reaction badge update
+        if action == 'reaction':
+            to_user = payload.get('to-user') or payload.get('to_user') or payload.get('to_userid')
+            reaction_data = payload.get('reaction') or {}
+            target_msg_id = str(reaction_data.get('message_id') or payload.get('message_id') or '')
+            emoji = reaction_data.get('emoji') or payload.get('message') or ''
+            is_removed = bool(payload.get('is_removed') or reaction_data.get('is_removed', False))
+
+            # Extract integer telegram message ID if formatted like msg_tg_<chat>_<id>
+            tg_msg_id = None
+            if target_msg_id:
+                if '_' in target_msg_id:
+                    parts = target_msg_id.split('_')
+                    if parts[-1].isdigit():
+                        tg_msg_id = int(parts[-1])
+                elif target_msg_id.isdigit():
+                    tg_msg_id = int(target_msg_id)
+
+            if not tg_msg_id and target_msg_id:
+                from telegram_chat.models import ChatMessage
+                db_msg = await database_sync_to_async(
+                    lambda: ChatMessage.objects.filter(message_uid=target_msg_id).first()
+                )()
+                if db_msg and db_msg.message_uid:
+                    if '_' in db_msg.message_uid:
+                        parts = db_msg.message_uid.split('_')
+                        if parts[-1].isdigit():
+                            tg_msg_id = int(parts[-1])
+                    elif db_msg.message_uid.isdigit():
+                        tg_msg_id = int(db_msg.message_uid)
+
+            if to_user and tg_msg_id and to_user != 'saved_messages':
+                from telegram_chat.bot_service import TelegramBotGateway
+                bot_token = await self.get_bot_token(self.user_id)
+                TelegramBotGateway.set_message_reaction_async(
+                    bot_token=bot_token,
+                    chat_id=to_user,
+                    message_id=tg_msg_id,
+                    emoji=None if is_removed else emoji,
+                    operator_id=self.user_id
+                )
+
+            # Broadcast reaction event to operator group so UI displays reaction badge without creating a message/sticker
+            await self.channel_layer.group_send(
+                self.room_group,
+                {
+                    "type": "chat_message",
+                    "data": {
+                        "action": "reaction",
+                        "chatId": to_user,
+                        "to-user": to_user,
+                        "messageId": target_msg_id,
+                        "reaction": {
+                            "message_id": target_msg_id,
+                            "emoji": emoji,
+                            "is_removed": is_removed
+                        },
+                        "message": emoji,
+                        "is_removed": is_removed,
+                        "userId": self.user_id,
+                        "sender_id": self.user_id,
+                        "is_outgoing": True,
+                        "timestamp": int(timezone.now().timestamp() * 1000)
+                    }
+                }
+            )
+
+            await self.send(text_data=json.dumps({
+                "action": "ack",
+                "status": "reaction_set"
+            }))
+            return
+
+        # Handle delete_message action: remove from DB, delete from Telegram if requested, broadcast update
+        if action == 'delete_message':
+            to_user = payload.get('to-user') or payload.get('to_user') or payload.get('to_userid')
+            target_msg_id = str(payload.get('message_id') or payload.get('messageId') or payload.get('message') or '')
+            delete_for_everyone = bool(payload.get('delete_for_everyone', True))
+
+            tg_msg_id = None
+            if target_msg_id:
+                from telegram_chat.models import ChatMessage
+                db_msg = await database_sync_to_async(
+                    lambda: ChatMessage.objects.filter(
+                        Q(message_uid=target_msg_id) | Q(id=int(target_msg_id) if target_msg_id.isdigit() else -1)
+                    ).first()
+                )()
+                if db_msg:
+                    if db_msg.message_uid:
+                        if '_' in db_msg.message_uid:
+                            parts = db_msg.message_uid.split('_')
+                            if parts[-1].isdigit():
+                                tg_msg_id = int(parts[-1])
+                        elif db_msg.message_uid.isdigit():
+                            tg_msg_id = int(db_msg.message_uid)
+                    await database_sync_to_async(lambda: db_msg.delete())()
+
+            if delete_for_everyone and to_user and to_user != 'saved_messages':
+                if not tg_msg_id and target_msg_id:
+                    if '_' in target_msg_id:
+                        parts = target_msg_id.split('_')
+                        if parts[-1].isdigit():
+                            tg_msg_id = int(parts[-1])
+                    elif target_msg_id.isdigit():
+                        tg_msg_id = int(target_msg_id)
+
+                if tg_msg_id:
+                    from telegram_chat.bot_service import TelegramBotGateway
+                    bot_token = await self.get_bot_token(self.user_id)
+                    TelegramBotGateway.delete_message_async(
+                        bot_token=bot_token,
+                        chat_id=to_user,
+                        message_id=tg_msg_id,
+                        operator_id=self.user_id
+                    )
+
+            await self.channel_layer.group_send(
+                self.room_group,
+                {
+                    "type": "chat_message",
+                    "data": {
+                        "action": "delete_message",
+                        "chatId": to_user,
+                        "to-user": to_user,
+                        "messageId": target_msg_id,
+                        "is_removed": True,
+                        "timestamp": int(timezone.now().timestamp() * 1000)
+                    }
+                }
+            )
+
+            await self.send(text_data=json.dumps({
+                "action": "ack",
+                "status": "message_deleted",
+                "messageId": target_msg_id
+            }))
+            return
+
         # Handle typing indicator broadcast
         if action == 'typing':
             to_user = payload.get('to-user') or payload.get('to_user')
@@ -186,6 +324,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if sticker and file_url and not sticker.get('url'):
             sticker['url'] = file_url
         media = payload.get('media') if isinstance(payload.get('media'), dict) else None
+        album = payload.get('album') if isinstance(payload.get('album'), list) else None
 
         if not to_user:
             await self.send(text_data=json.dumps({
@@ -211,7 +350,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             text=text,
             action=action,
             sticker=sticker,
-            media=media
+            media=media,
+            album=album
         )
 
         now_ms = int(timezone.now().timestamp() * 1000)
@@ -232,6 +372,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             event_data["sticker"] = sticker
         if media:
             event_data["media"] = media
+        if album:
+            event_data["album"] = album
 
         await self.channel_layer.group_send(
             self.room_group,
@@ -253,7 +395,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 sticker=sticker,
                 action=action,
                 operator_id=self.user_id,
-                msg_uid=msg_uid
+                msg_uid=msg_uid,
+                album=album
             )
 
         # 4. Immediate ACK to sender socket

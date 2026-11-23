@@ -14,7 +14,8 @@ import {
   MessageCircle,
   Copy,
   CheckCircle2,
-  ExternalLink
+  ExternalLink,
+  Pin
 } from 'lucide-react';
 import { TelegramUser, ChatMessage } from '../../types/chat';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -33,14 +34,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onClose
 }) => {
   const { theme } = useTheme();
-  const { activeMessages, clearChat, deleteChat, toggleMuteChat, isChatMuted, selectChat } = useChat();
+  const isGold = theme === 'black-gold';
+  const { activeMessages, clearChat, deleteChat, toggleMuteChat, isChatMuted, togglePinChat, isChatPinned, selectChat } = useChat();
   const [activeTab, setActiveTab] = useState<'media' | 'files' | 'voice'>('media');
   const [copied, setCopied] = useState(false);
 
   if (!isOpen || !user) return null;
 
-  const isGold = theme === 'black-gold';
   const isMuted = isChatMuted(user.id);
+  const isPinned = isChatPinned(user.id);
   const fullName = `${user.firstName} ${user.lastName || ''}`.trim();
 
   // Filter media items from active conversation
@@ -150,6 +152,30 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {isMuted ? <Bell className="w-4 h-4 text-emerald-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
               <span>{isMuted ? 'Unmute' : 'Mute'}</span>
             </button>
+
+            {user.id !== 'saved_messages' && (
+              <button
+                onClick={() => togglePinChat(user.id)}
+                className={`px-4 py-2 rounded-xl border font-semibold text-xs flex items-center gap-1.5 transition btn-press ${
+                  isPinned
+                    ? isGold
+                      ? 'bg-[#d4af37]/20 border-[#e5b842]/40 text-[#e5b842]'
+                      : 'bg-[var(--color-accent)]/20 border-[var(--color-accent)]/40 text-[var(--color-accent)]'
+                    : 'bg-white/5 hover:bg-white/10 border-white/10 text-white'
+                }`}
+              >
+                <Pin
+                  className={`w-4 h-4 ${
+                    isPinned
+                      ? isGold
+                        ? 'text-[#e5b842] fill-[#e5b842]'
+                        : 'text-[var(--color-accent)] fill-[var(--color-accent)]'
+                      : 'text-zinc-400'
+                  }`}
+                />
+                <span>{isPinned ? 'Unpin' : 'Pin'}</span>
+              </button>
+            )}
           </div>
         </div>
 

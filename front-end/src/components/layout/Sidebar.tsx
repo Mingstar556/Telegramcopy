@@ -37,6 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     searchQuery,
     setSearchQuery,
     archiveChat,
+    togglePinChat,
     openSavedMessages,
     isLoading
   } = useChat();
@@ -46,14 +47,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isArchivedOpen, setIsArchivedOpen] = useState(false);
 
-  // Filter unarchived conversations
-  const filteredChats = conversations.filter(c => {
-    const query = searchQuery.toLowerCase();
-    const fullName = `${c.user.firstName} ${c.user.lastName || ''}`.toLowerCase();
-    const username = (c.user.username || '').toLowerCase();
-    const lastMsg = (c.lastMessage?.message || '').toLowerCase();
-    return fullName.includes(query) || username.includes(query) || lastMsg.includes(query);
-  });
+  // Filter and sort unarchived conversations: pinned chats always stay at the top
+  const filteredChats = conversations
+    .filter(c => {
+      const query = searchQuery.toLowerCase();
+      const fullName = `${c.user.firstName} ${c.user.lastName || ''}`.toLowerCase();
+      const username = (c.user.username || '').toLowerCase();
+      const lastMsg = (c.lastMessage?.message || '').toLowerCase();
+      return fullName.includes(query) || username.includes(query) || lastMsg.includes(query);
+    })
+    .sort((a, b) => {
+      // Saved Messages always first
+      if (a.isSavedMessages && !b.isSavedMessages) return -1;
+      if (!a.isSavedMessages && b.isSavedMessages) return 1;
+      // Pinned chats come before non-pinned chats
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return 0;
+    });
 
   return (
     <aside
@@ -239,6 +250,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               isUnseen={isChatUnseen(chat.id)}
               onSelect={() => selectChat(chat.id)}
               onArchive={(id) => archiveChat(id, true)}
+              onTogglePin={togglePinChat}
             />
           ))
         )}

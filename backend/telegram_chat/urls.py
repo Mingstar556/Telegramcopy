@@ -11,6 +11,7 @@ urlpatterns = [
     path('chats/', views.chats_list, name='chats_list'),
     path('messages/', views.messages_history, name='messages_history'),
     path('messages/send/', views.send_message, name='send_message'),
+    path('messages/delete/', views.delete_message_view, name='delete_message'),
     path('media/upload/', views.media_upload, name='media_upload'),
     path('telegram/sync/', views.sync_telegram_view, name='sync_telegram'),
     path('telegram/webhook/', views.telegram_webhook, name='telegram_webhook_default'),
@@ -22,4 +23,6 @@ urlpatterns = [
     path('admin/generate-accounts/', views.generate_bot_accounts_view, name='generate_bot_accounts'),
     path('admin/bot-accounts/', views.list_bot_accounts_view, name='list_bot_accounts'),
     path('admin/bot-accounts/<str:user_id>/', views.delete_bot_account_view, name='delete_bot_account'),
+    path('media/proxy/', views.telegram_media_proxy_view, name='telegram_media_proxy'),
+    path('chats/wipe/', views.wipe_chat_history_view, name='wipe_chat_history'),
 ]

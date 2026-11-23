@@ -161,6 +161,9 @@ class ChatMessage(models.Model):
         indexes = [
             models.Index(fields=['sender_id', 'to_user']),
             models.Index(fields=['to_user', 'created_at']),
+            models.Index(fields=['sender_id', 'created_at']),
+            models.Index(fields=['is_outgoing', 'status']),
+            models.Index(fields=['created_at']),
         ]
 
     def __str__(self):

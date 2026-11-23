@@ -45,6 +45,33 @@ class OutboundRateLimiter:
                 self.tokens -= 1.0
 
 
+class PerChatRateLimiter:
+    """Enforces Telegram's 1 message/second limit per individual chat ID to avoid 429 flood errors."""
+    def __init__(self, min_interval: float = 0.7):
+        self.min_interval = min_interval
+        self._last_sent: Dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def acquire(self, chat_id: Optional[str]):
+        if not chat_id:
+            return
+        cid = str(chat_id).strip()
+        sleep_time = 0.0
+        with self._lock:
+            now = time.monotonic()
+            last_time = self._last_sent.get(cid, 0.0)
+            elapsed = now - last_time
+            if elapsed < self.min_interval:
+                sleep_time = self.min_interval - elapsed
+            self._last_sent[cid] = now + sleep_time
+            if len(self._last_sent) > 5000:
+                cutoff = now - 60.0
+                self._last_sent = {k: v for k, v in self._last_sent.items() if v > cutoff}
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+
 class TelegramBotGateway:
     """
     Scalable Multi-Bot Gateway service.
@@ -56,8 +83,9 @@ class TelegramBotGateway:
     _last_update_ids: Dict[str, int] = {}
     _sync_lock: threading.Lock = threading.Lock()
     _http_session: Optional[requests.Session] = None
-    _outbound_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=8, thread_name_prefix='tg_outbound')
+    _outbound_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=32, thread_name_prefix='tg_outbound')
     _rate_limiter: OutboundRateLimiter = OutboundRateLimiter(rate=30.0, capacity=30.0)
+    _chat_rate_limiter: PerChatRateLimiter = PerChatRateLimiter(min_interval=0.7)
 
     @classmethod
     def get_http_session(cls) -> requests.Session:
@@ -112,10 +140,13 @@ class TelegramBotGateway:
         """Fetch bot token for the given CS operator or fallback to centralized settings/env."""
         if user_id:
             try:
-                bot = BotAccount.objects.get(user_id=str(user_id))
-                if bot.bot_token:
+                user_id_str = str(user_id).strip()
+                bot = BotAccount.objects.filter(user_id=user_id_str).first()
+                if not bot:
+                    bot = BotAccount.objects.filter(employee__user_id=user_id_str).first()
+                if bot and bot.bot_token:
                     return bot.bot_token
-            except BotAccount.DoesNotExist:
+            except Exception:
                 pass
         return os.environ.get('TELEGRAM_BOT_TOKEN') or getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
 
@@ -247,7 +278,7 @@ class TelegramBotGateway:
     @classmethod
     def async_fetch_and_cache_avatar(cls, bot_token: str, telegram_id: str, is_bot: bool = False):
         """Dispatches avatar fetching asynchronously to background thread pool for sub-10ms UI responsiveness."""
-        if not bot_token or not telegram_id:
+        if not bot_token or not telegram_id or cls._is_test_environment():
             return
 
         def _fetch_worker():
@@ -255,6 +286,24 @@ class TelegramBotGateway:
                 av = cls.fetch_and_cache_telegram_avatar(bot_token, telegram_id, is_bot=is_bot)
                 if av and not is_bot:
                     TelegramUser.objects.filter(telegram_id=str(telegram_id)).update(avatar=av)
+                    # Broadcast updated avatar to operator frontend
+                    from channels.layers import get_channel_layer
+                    from asgiref.sync import async_to_sync
+                    channel_layer = get_channel_layer()
+                    if channel_layer:
+                        from .models import BotAccount
+                        for op_id in BotAccount.objects.filter(bot_token=bot_token).values_list('user_id', flat=True):
+                            async_to_sync(channel_layer.group_send)(
+                                f"operator_{op_id}",
+                                {
+                                    "type": "chat_message",
+                                    "data": {
+                                        "action": "user_updated",
+                                        "user_id": str(telegram_id),
+                                        "avatar": av
+                                    }
+                                }
+                            )
             except Exception as e:
                 logger.debug(f"[Async Avatar Fetch Error] {e}")
 
@@ -334,6 +383,19 @@ class TelegramBotGateway:
                     "new_messages": 0,
                     "last_update_id": cls._last_update_id,
                     "error": "No bot token configured"
+                }
+
+            # If background poller is already running for this bot token, skip duplicate getUpdates to prevent 409 Conflict
+            from .poller import AutoPollerEngine
+            if not cls._is_test_environment() and AutoPollerEngine.is_bot_polling(bot_token):
+                logger.debug(f"[Telegram Gateway] Bot is already actively polled by AutoPollerEngine; skipping duplicate getUpdates.")
+                return {
+                    "status": "success",
+                    "synced_users": 0,
+                    "synced_messages": 0,
+                    "new_messages": 0,
+                    "last_update_id": cls._last_update_ids.get(bot_token, cls._last_update_id),
+                    "is_active_poller": True
                 }
 
             # In automated tests without requests mock, avoid making live network requests
@@ -503,8 +565,10 @@ class TelegramBotGateway:
         If token is missing, dummy, or offline/network error, returns simulated result payload
         or structured error dict.
         """
-        # Global outbound rate limiter (~30 msgs/sec limit)
+        # Global outbound rate limiter (~30 msgs/sec limit) and per-chat rate limiter (~1 msg/sec limit)
         cls._rate_limiter.acquire()
+        if chat_id:
+            cls._chat_rate_limiter.acquire(chat_id)
         if bot_token is None:
             if operator_id:
                 bot_token = cls.get_bot_token(operator_id)
@@ -611,7 +675,7 @@ class TelegramBotGateway:
                     payload['caption'] = text
                 if reply_markup:
                     payload['reply_markup'] = reply_markup
-                resp = cls._post(url, json=payload, timeout=15)
+                resp = cls._post(url, json=payload, timeout=10)
                 return resp.json()
 
             # 2.1 Video Dispatch
@@ -743,8 +807,8 @@ class TelegramBotGateway:
                     except Exception as ex:
                         logger.warning(f"[Telegram Gateway] Failed to send base64 sticker: {ex}")
 
-                # Real Telegram file_id (typically > 20 chars alphanumeric) or public HTTP(S) URL
-                if sticker_target and (len(sticker_target) >= 20 or sticker_target.startswith('http')):
+                # Real Telegram file_id (typically > 25 chars alphanumeric, no 'sticker_' prefix) or public HTTP(S) URL
+                if sticker_target and not sticker_target.startswith('sticker_') and (len(sticker_target) >= 25 or sticker_target.startswith('http')):
                     url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendSticker"
                     payload = {'chat_id': chat_id, 'sticker': sticker_target}
                     if sticker_dict and sticker_dict.get('emoji'):
@@ -812,7 +876,7 @@ class TelegramBotGateway:
 
         def _worker():
             try:
-                cls.send_telegram_message(
+                res = cls.send_telegram_message(
                     bot_token=bot_token,
                     chat_id=chat_id,
                     text=text,
@@ -823,8 +887,156 @@ class TelegramBotGateway:
                     reply_markup=reply_markup,
                     album=album
                 )
+                if msg_uid and isinstance(res, dict) and res.get('ok'):
+                    try:
+                        from .models import ChatMessage
+                        ChatMessage.objects.filter(message_uid=msg_uid).update(status='delivered')
+                    except Exception:
+                        pass
             except Exception as exc:
                 logger.error(f"[Async Dispatch Error]: {exc}")
+
+        cls._outbound_executor.submit(_worker)
+
+    @classmethod
+    def set_message_reaction(
+        cls,
+        bot_token: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        message_id: Optional[int] = None,
+        emoji: Optional[str] = None,
+        operator_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Sets a reaction on a message in Telegram using setMessageReaction Bot API.
+        """
+        cls._rate_limiter.acquire()
+        if bot_token is None:
+            if operator_id:
+                bot_token = cls.get_bot_token(operator_id)
+            else:
+                bot_token = cls.get_bot_token()
+
+        if not bot_token or not chat_id or not message_id:
+            logger.warning("[Telegram Gateway] Cannot set reaction: missing bot_token, chat_id, or message_id")
+            return {"ok": False, "error": "Missing bot_token, chat_id, or message_id"}
+
+        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/setMessageReaction"
+        reaction_list = [{"type": "emoji", "emoji": emoji}] if emoji else []
+        payload = {
+            "chat_id": chat_id,
+            "message_id": int(message_id),
+            "reaction": reaction_list
+        }
+        try:
+            resp = cls._post(url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"ok": False, "status_code": resp.status_code, "text": resp.text}
+        except Exception as e:
+            logger.warning(f"[Telegram Gateway] Failed to set reaction: {e}")
+            return {"ok": False, "error": str(e)}
+
+    @classmethod
+    def set_message_reaction_async(
+        cls,
+        bot_token: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        message_id: Optional[int] = None,
+        emoji: Optional[str] = None,
+        operator_id: Optional[str] = None
+    ):
+        """
+        Asynchronously sets reaction on Telegram message.
+        """
+        if cls._is_test_environment():
+            return cls.set_message_reaction(
+                bot_token=bot_token,
+                chat_id=chat_id,
+                message_id=message_id,
+                emoji=emoji,
+                operator_id=operator_id
+            )
+
+        def _worker():
+            try:
+                cls.set_message_reaction(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    emoji=emoji,
+                    operator_id=operator_id
+                )
+            except Exception as exc:
+                logger.error(f"[Async Reaction Error]: {exc}")
+
+        cls._outbound_executor.submit(_worker)
+
+    @classmethod
+    def delete_message(
+        cls,
+        bot_token: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        message_id: Optional[int] = None,
+        operator_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Deletes a message in Telegram using deleteMessage Bot API.
+        """
+        cls._rate_limiter.acquire()
+        if bot_token is None:
+            if operator_id:
+                bot_token = cls.get_bot_token(operator_id)
+            else:
+                bot_token = cls.get_bot_token()
+
+        if not bot_token or not chat_id or not message_id:
+            logger.warning("[Telegram Gateway] Cannot delete message: missing bot_token, chat_id, or message_id")
+            return {"ok": False, "error": "Missing bot_token, chat_id, or message_id"}
+
+        url = f"{TELEGRAM_API_BASE}/bot{bot_token}/deleteMessage"
+        payload = {
+            "chat_id": chat_id,
+            "message_id": int(message_id)
+        }
+        try:
+            resp = cls._post(url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"ok": False, "status_code": resp.status_code, "text": resp.text}
+        except Exception as e:
+            logger.warning(f"[Telegram Gateway] Failed to delete telegram message: {e}")
+            return {"ok": False, "error": str(e)}
+
+    @classmethod
+    def delete_message_async(
+        cls,
+        bot_token: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        message_id: Optional[int] = None,
+        operator_id: Optional[str] = None
+    ):
+        """
+        Asynchronously deletes a message in Telegram.
+        """
+        if cls._is_test_environment():
+            return cls.delete_message(
+                bot_token=bot_token,
+                chat_id=chat_id,
+                message_id=message_id,
+                operator_id=operator_id
+            )
+
+        def _worker():
+            try:
+                cls.delete_message(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    operator_id=operator_id
+                )
+            except Exception as exc:
+                logger.error(f"[Async Delete Error]: {exc}")
 
         cls._outbound_executor.submit(_worker)
 
@@ -884,7 +1096,7 @@ class TelegramBotGateway:
             logger.error(f"[WebSocket Gateway] Failed to broadcast event: {e}")
 
     @classmethod
-    def handle_incoming_telegram_update(cls, operator_id: str, update: dict) -> bool:
+    def handle_incoming_telegram_update(cls, operator_id: str, update: dict, bot_token: Optional[str] = None) -> bool:
         """
         Processes an incoming update from Telegram (Webhook or Polling worker).
         Supports message, edited_message, channel_post, edited_channel_post, callback_query.
@@ -896,6 +1108,88 @@ class TelegramBotGateway:
 
         # Channel broadcast posts are not 1-on-1 customer service conversations
         if 'channel_post' in update or 'edited_channel_post' in update:
+            return False
+
+        message_reaction = update.get('message_reaction')
+        if message_reaction and isinstance(message_reaction, dict):
+            chat = message_reaction.get('chat') or {}
+            chat_id = str(chat.get('id', '') or '')
+            msg_id = message_reaction.get('message_id')
+            user = message_reaction.get('user') or {}
+            from_uid = str(user.get('id', '') or chat_id)
+            new_reactions = message_reaction.get('new_reaction', [])
+            old_reactions = message_reaction.get('old_reaction', [])
+            emoji = ''
+            if isinstance(new_reactions, list) and len(new_reactions) > 0:
+                first_r = new_reactions[-1]
+                if isinstance(first_r, dict):
+                    emoji = first_r.get('emoji', '')
+
+            old_emoji = ''
+            if isinstance(old_reactions, list) and len(old_reactions) > 0:
+                first_old = old_reactions[-1]
+                if isinstance(first_old, dict):
+                    old_emoji = first_old.get('emoji', '')
+
+            is_removed = bool(not emoji and old_emoji)
+
+            if chat_id and msg_id:
+                msg_uid = f"msg_tg_{chat_id}_{msg_id}"
+                ws_payload = {
+                    "action": "reaction",
+                    "chatId": chat_id,
+                    "to-user": operator_id,
+                    "from_user": from_uid,
+                    "sender_id": from_uid,
+                    "messageId": msg_uid,
+                    "reaction": {
+                        "message_id": msg_uid,
+                        "emoji": emoji,
+                        "old_emoji": old_emoji,
+                        "is_removed": is_removed
+                    },
+                    "message": emoji,
+                    "old_emoji": old_emoji,
+                    "is_removed": is_removed,
+                    "timestamp": int(timezone.now().timestamp() * 1000),
+                    "is_outgoing": False
+                }
+                cls.notify_operator_via_websocket(operator_id, ws_payload)
+                return True
+            return False
+
+        message_reaction_count = update.get('message_reaction_count')
+        if message_reaction_count and isinstance(message_reaction_count, dict):
+            chat = message_reaction_count.get('chat') or {}
+            chat_id = str(chat.get('id', '') or '')
+            msg_id = message_reaction_count.get('message_id')
+            reactions_list = message_reaction_count.get('reactions', [])
+            formatted_reactions = []
+            if isinstance(reactions_list, list):
+                for r_item in reactions_list:
+                    if isinstance(r_item, dict):
+                        r_type = r_item.get('type') or {}
+                        r_emoji = r_type.get('emoji') if isinstance(r_type, dict) else r_item.get('emoji', '')
+                        total_cnt = r_item.get('total_count', 1)
+                        if r_emoji:
+                            formatted_reactions.append({
+                                'emoji': r_emoji,
+                                'count': total_cnt,
+                                'users': []
+                            })
+            if chat_id and msg_id:
+                msg_uid = f"msg_tg_{chat_id}_{msg_id}"
+                ws_payload = {
+                    "action": "reaction",
+                    "chatId": chat_id,
+                    "to-user": operator_id,
+                    "messageId": msg_uid,
+                    "reactions": formatted_reactions,
+                    "timestamp": int(timezone.now().timestamp() * 1000),
+                    "is_outgoing": False
+                }
+                cls.notify_operator_via_websocket(operator_id, ws_payload)
+                return True
             return False
 
         callback_query = update.get('callback_query')
@@ -936,19 +1230,18 @@ class TelegramBotGateway:
         language_code = from_user.get('language_code') or None
         is_premium = bool(from_user.get('is_premium', False))
 
-        bot_token = cls.get_bot_token(operator_id)
+        if not bot_token:
+            bot_token = cls.get_bot_token(operator_id)
 
-        # Check or fetch user profile photo from Telegram
+        # Check or fetch user profile photo from Telegram (asynchronously in background so update isn't delayed)
         avatar_url = from_user.get('avatar')
-        if not avatar_url and bot_token:
+        if not avatar_url:
             existing_user = TelegramUser.objects.filter(telegram_id=telegram_id).first()
             if existing_user and existing_user.avatar:
                 avatar_url = existing_user.avatar
-            else:
-                try:
-                    avatar_url = cls.fetch_and_cache_telegram_avatar(bot_token, telegram_id)
-                except Exception as e:
-                    logger.debug(f"[Avatar Auto-Fetch Error] {e}")
+            elif bot_token:
+                # Dispatch avatar fetching in background thread so message arrives immediately
+                cls.async_fetch_and_cache_avatar(bot_token, telegram_id)
 
         # Fallback avatar if user hides photo or has none
         if not avatar_url:
@@ -996,10 +1289,10 @@ class TelegramBotGateway:
             if bot_token and file_id:
                 if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
                     try:
-                        f_res = requests.get(
+                        f_res = cls._get(
                             f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
                             params={'file_id': file_id},
-                            timeout=5
+                            timeout=4
                         ).json()
                         if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
                             file_path = f_res['result'].get('file_path')
@@ -1021,10 +1314,10 @@ class TelegramBotGateway:
             if bot_token and file_id:
                 if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
                     try:
-                        f_res = requests.get(
+                        f_res = cls._get(
                             f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
                             params={'file_id': file_id},
-                            timeout=5
+                            timeout=4
                         ).json()
                         if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
                             file_path = f_res['result'].get('file_path')
@@ -1047,10 +1340,10 @@ class TelegramBotGateway:
             if bot_token and file_id:
                 if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
                     try:
-                        f_res = requests.get(
+                        f_res = cls._get(
                             f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
                             params={'file_id': file_id},
-                            timeout=5
+                            timeout=4
                         ).json()
                         if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
                             file_path = f_res['result'].get('file_path')
@@ -1073,10 +1366,10 @@ class TelegramBotGateway:
             if bot_token and file_id:
                 if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
                     try:
-                        f_res = requests.get(
+                        f_res = cls._get(
                             f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
                             params={'file_id': file_id},
-                            timeout=5
+                            timeout=4
                         ).json()
                         if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
                             file_path = f_res['result'].get('file_path')
@@ -1098,10 +1391,10 @@ class TelegramBotGateway:
             if bot_token and file_id:
                 if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
                     try:
-                        f_res = requests.get(
+                        f_res = cls._get(
                             f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
                             params={'file_id': file_id},
-                            timeout=5
+                            timeout=4
                         ).json()
                         if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
                             file_path = f_res['result'].get('file_path')
@@ -1141,10 +1434,10 @@ class TelegramBotGateway:
                 text_content = f"{sticker_emoji} [{sticker_id}]" if sticker_id else sticker_emoji
 
         # Determine message action
-        if media_type:
-            action = 'send_media'
-        elif sticker_id:
+        if sticker_id:
             action = 'send_sticker'
+        elif media_type:
+            action = 'send_media'
         else:
             action = 'send_message'
 
@@ -1214,7 +1507,13 @@ class TelegramBotGateway:
                 if len(group_photos) > 1:
                     ws_payload["album"] = [{"type": "photo", "url": u} for u in group_photos if u]
         if media_type:
-            ws_payload["media"] = {"type": media_type, "url": media_url}
+            media_dict = {"type": media_type, "url": media_url}
+            if media_filename:
+                media_dict["fileName"] = media_filename
+                media_dict["file_name"] = media_filename
+            if media_duration:
+                media_dict["duration"] = media_duration
+            ws_payload["media"] = media_dict
         if sticker_id:
             ws_payload["sticker"] = {
                 "id": sticker_id,

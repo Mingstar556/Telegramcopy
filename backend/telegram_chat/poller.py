@@ -55,14 +55,14 @@ class BotPollerThread(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 params = {
-                    'timeout': 25,
-                    'allowed_updates': json.dumps(["message", "edited_message", "callback_query", "channel_post", "edited_channel_post"])
+                    'timeout': 10,
+                    'allowed_updates': json.dumps(["message", "edited_message", "callback_query", "channel_post", "edited_channel_post", "message_reaction", "message_reaction_count"])
                 }
                 if self.last_update_id > 0:
                     params['offset'] = self.last_update_id + 1
 
                 url = f"{TELEGRAM_API_BASE}/bot{self.bot_token}/getUpdates"
-                res = self.session.get(url, params=params, timeout=35)
+                res = self.session.get(url, params=params, timeout=18)
 
                 if res.status_code == 200:
                     data = res.json()
@@ -80,15 +80,16 @@ class BotPollerThread(threading.Thread):
 
                             try:
                                 from .models import BotAccount
+                                # Pass bot_token to handle_incoming_telegram_update so updates are accurately routed to all accounts sharing this bot
                                 ops = list(BotAccount.objects.filter(bot_token=self.bot_token).values_list('user_id', flat=True))
                                 target_op = self.user_id if self.user_id in ops else (ops[0] if ops else self.user_id)
-                                TelegramBotGateway.handle_incoming_telegram_update(target_op, update)
+                                TelegramBotGateway.handle_incoming_telegram_update(target_op, update, bot_token=self.bot_token)
                             except Exception as up_err:
                                 logger.error(f"[AutoPoller] Error processing update {up_id} for {self.user_id}: {up_err}")
                 elif res.status_code == 409:
                     # Concurrency or active webhook
-                    logger.info(f"[AutoPoller] getUpdates returned 409 Conflict for {self.user_id}. Backing off 3s...")
-                    self.stop_event.wait(3)
+                    logger.info(f"[AutoPoller] getUpdates returned 409 Conflict for {self.user_id}. Backing off 1s...")
+                    self.stop_event.wait(1)
                 elif res.status_code in (401, 404):
                     logger.warning(f"[AutoPoller] Invalid or revoked bot token for operator {self.user_id}. Sleeping 30s...")
                     self.stop_event.wait(30)
@@ -147,6 +148,16 @@ class AutoPollerEngine:
                     cls._ensure_bot_thread_locked(bot.user_id, bot.bot_token)
             except Exception as e:
                 logger.warning(f"[AutoPollerEngine] Could not load bot accounts for auto-poller: {e}")
+
+    @classmethod
+    def is_bot_polling(cls, bot_token: str) -> bool:
+        """Check if a long-polling thread is active for the given bot token."""
+        if not bot_token:
+            return False
+        with cls._lock:
+            token_key = str(bot_token).strip()
+            poller = cls._pollers.get(token_key)
+            return bool(poller and poller.is_alive())
 
     @classmethod
     def ensure_bot_polling(cls, user_id: str):
