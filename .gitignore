@@ -78,4 +78,8 @@ UserBot_chat/**/db.sqlite3
 UserBot_chat/**/db.sqlite3-journal
 UserBot_chat/**/media/uploads/**
 
+# Public employee distribution packages
+!TBOTchat-public/**
+!TBOTchat-pubilc/**
+
 
