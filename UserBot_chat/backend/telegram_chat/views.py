@@ -672,10 +672,26 @@ def messages_history(request):
             for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
                 allowed_operator_ids.add(str(s_uid))
 
-    messages = ChatMessage.objects.filter(
+    limit_param = request.query_params.get('limit')
+    base_qs = ChatMessage.objects.filter(
         (Q(sender_id__in=allowed_operator_ids) & Q(to_user=to_user)) |
         (Q(sender_id=to_user) & Q(to_user__in=allowed_operator_ids))
-    ).order_by('created_at')
+    ).exclude(action='cleared_chat')
+
+    if limit_param == 'all':
+        messages = list(base_qs.order_by('created_at'))
+    else:
+        limit = 150
+        if limit_param:
+            try:
+                parsed = int(limit_param)
+                if parsed > 0:
+                    limit = min(parsed, 500)
+            except ValueError:
+                pass
+        recent_messages = list(base_qs.order_by('-created_at')[:limit])
+        recent_messages.reverse()
+        messages = recent_messages
 
     target_user = TelegramUser.objects.filter(telegram_id=to_user).first()
     target_avatar = target_user.avatar if target_user else ''

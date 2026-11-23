@@ -530,11 +530,8 @@ def chats_list(request):
     sync_param = request.query_params.get('sync')
     if sync_param and str(sync_param).strip().lower() in ['true', '1']:
         try:
-            if TelegramBotGateway._is_test_environment():
-                TelegramBotGateway.sync_bot_conversations(operator_id=operator_id)
-            else:
-                import threading
-                threading.Thread(target=TelegramBotGateway.sync_bot_conversations, kwargs={'operator_id': operator_id}, daemon=True).start()
+            import threading
+            threading.Thread(target=TelegramBotGateway.sync_bot_conversations, kwargs={'operator_id': operator_id}, daemon=True).start()
         except Exception as e:
             logger.warning(f"[Chats List] Auto-sync failed gracefully: {e}")
 
@@ -686,10 +683,26 @@ def messages_history(request):
             for s_uid in BotAccount.objects.filter(bot_token=bot.bot_token).values_list('user_id', flat=True):
                 allowed_operator_ids.add(str(s_uid))
 
-    messages = ChatMessage.objects.filter(
+    limit_param = request.query_params.get('limit')
+    base_qs = ChatMessage.objects.filter(
         (Q(sender_id__in=allowed_operator_ids) & Q(to_user=to_user)) |
         (Q(sender_id=to_user) & Q(to_user__in=allowed_operator_ids))
-    ).exclude(action='cleared_chat').order_by('created_at')
+    ).exclude(action='cleared_chat')
+
+    if limit_param == 'all':
+        messages = list(base_qs.order_by('created_at'))
+    else:
+        limit = 150
+        if limit_param:
+            try:
+                parsed = int(limit_param)
+                if parsed > 0:
+                    limit = min(parsed, 500)
+            except ValueError:
+                pass
+        recent_messages = list(base_qs.order_by('-created_at')[:limit])
+        recent_messages.reverse()
+        messages = recent_messages
 
     target_user = TelegramUser.objects.filter(telegram_id=to_user).first()
     target_avatar = target_user.avatar if target_user else ''
@@ -1157,10 +1170,7 @@ def telegram_webhook(request, user_id=None):
                 return Response({"ok": False, "detail": sec_err}, status=status.HTTP_400_BAD_REQUEST)
 
     # Async Queue: offload DB/API processing to background thread pool, return 200 OK immediately
-    if TelegramBotGateway._is_test_environment():
-        TelegramBotGateway.handle_incoming_telegram_update(operator_id, update)
-    else:
-        _webhook_worker_pool.submit(TelegramBotGateway.handle_incoming_telegram_update, operator_id, update)
+    _webhook_worker_pool.submit(TelegramBotGateway.handle_incoming_telegram_update, operator_id, update)
     return Response({"ok": True, "status": "queued"})
 
 

@@ -145,8 +145,18 @@ export interface HealthCheckResult {
 }
 
 class ApiService {
+  private userProfileCache: Map<string, { data: BotAccount; expiresAt: number }> = new Map();
+
   public getBaseUrl(): string {
     return getApiBaseUrl();
+  }
+
+  public invalidateUserProfileCache(userId?: string): void {
+    if (userId) {
+      this.userProfileCache.delete(userId);
+    } else {
+      this.userProfileCache.clear();
+    }
   }
 
   /**
@@ -225,9 +235,15 @@ class ApiService {
   }
 
   /**
-   * Request / Check bot user data from backend
+   * Request / Check bot user data from backend (with in-memory TTL caching)
    */
-  async checkUserData(userId: string, token?: string): Promise<BotAccount> {
+  async checkUserData(userId: string, token?: string, forceRefresh = false): Promise<BotAccount> {
+    const now = Date.now();
+    const cached = this.userProfileCache.get(userId);
+    if (!forceRefresh && cached && cached.expiresAt > now) {
+      return cached.data;
+    }
+
     const base = this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -241,7 +257,7 @@ class ApiService {
     }
 
     const data = await res.json();
-    return {
+    const account: BotAccount = {
       userId: data["User-ID"] || userId,
       botName: data.bot_name || 'Telegram Bot',
       botUsername: data.bot_username || 'bot',
@@ -249,6 +265,10 @@ class ApiService {
       description: data.description,
       connectedAt: data.connected_at
     };
+
+    // Cache profile for 5 minutes (rapid account switching performance)
+    this.userProfileCache.set(userId, { data: account, expiresAt: now + 300000 });
+    return account;
   }
 
   /**
@@ -275,6 +295,7 @@ class ApiService {
     }
 
     const data = await res.json();
+    this.invalidateUserProfileCache(userId);
     return {
       success: true,
       avatarUrl: resolveMediaUrl(data.avatar || data.avatar_url)
@@ -300,6 +321,7 @@ class ApiService {
       throw new Error(err.detail || err.error || 'Failed to remove bot avatar');
     }
 
+    this.invalidateUserProfileCache(userId);
     return { success: true };
   }
 
@@ -341,13 +363,14 @@ class ApiService {
   /**
    * Fetch message history for a specific conversation
    */
-  async fetchMessages(userId: string, toUser: string, token?: string): Promise<ChatMessage[]> {
+  async fetchMessages(userId: string, toUser: string, token?: string, limit: number | 'all' = 150): Promise<ChatMessage[]> {
     const base = this.getBaseUrl();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
+    const limitQuery = limit === 'all' ? '&limit=all' : `&limit=${encodeURIComponent(limit)}`;
     const res = await fetchWithTimeout(
-      `${base}/api/messages/?User-ID=${encodeURIComponent(userId)}&to-user=${encodeURIComponent(toUser)}`,
+      `${base}/api/messages/?User-ID=${encodeURIComponent(userId)}&to-user=${encodeURIComponent(toUser)}${limitQuery}`,
       { headers },
       10000
     );

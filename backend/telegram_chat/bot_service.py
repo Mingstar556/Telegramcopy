@@ -10,7 +10,6 @@ from typing import Optional, Dict, Any, List
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import unittest.mock
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings
@@ -108,32 +107,11 @@ class TelegramBotGateway:
 
     @classmethod
     def _post(cls, url: str, **kwargs):
-        if cls._is_callable_mocked(requests.post):
-            return requests.post(url, **kwargs)
         return cls.get_http_session().post(url, **kwargs)
 
     @classmethod
     def _get(cls, url: str, **kwargs):
-        if cls._is_callable_mocked(requests.get):
-            return requests.get(url, **kwargs)
         return cls.get_http_session().get(url, **kwargs)
-
-    @classmethod
-    def _is_test_environment(cls) -> bool:
-        """Return True if executing under automated test runner."""
-        return (
-            'test' in sys.argv
-            or getattr(settings, 'TESTING', False)
-            or bool(os.environ.get('DJANGO_TEST_MODE'))
-        )
-
-    @classmethod
-    def _is_callable_mocked(cls, func) -> bool:
-        """Check if a function or method is a unittest Mock/MagicMock."""
-        return (
-            hasattr(func, 'mock_calls')
-            or isinstance(func, (unittest.mock.Mock, unittest.mock.MagicMock))
-        )
 
     @classmethod
     def get_bot_token(cls, user_id: Optional[str] = None) -> Optional[str]:
@@ -196,9 +174,6 @@ class TelegramBotGateway:
                     return relative_url
             except Exception:
                 pass
-
-        if cls._is_test_environment():
-            return None
 
         try:
             file_id = None
@@ -278,7 +253,7 @@ class TelegramBotGateway:
     @classmethod
     def async_fetch_and_cache_avatar(cls, bot_token: str, telegram_id: str, is_bot: bool = False):
         """Dispatches avatar fetching asynchronously to background thread pool for sub-10ms UI responsiveness."""
-        if not bot_token or not telegram_id or cls._is_test_environment():
+        if not bot_token or not telegram_id:
             return
 
         def _fetch_worker():
@@ -319,8 +294,6 @@ class TelegramBotGateway:
         """
         if not bot_token:
             return {"ok": False, "error": "Bot token not configured"}
-        if cls._is_test_environment() and not cls._is_callable_mocked(requests.post):
-            return {"ok": True, "result": True, "simulated": True}
         try:
             import json
             url = f"{TELEGRAM_API_BASE}/bot{bot_token}/setMyProfilePhoto"
@@ -341,8 +314,6 @@ class TelegramBotGateway:
         """
         if not bot_token:
             return {"ok": False, "error": "Bot token not configured"}
-        if cls._is_test_environment() and not cls._is_callable_mocked(requests.post):
-            return {"ok": True, "result": True, "simulated": True}
         try:
             url = f"{TELEGRAM_API_BASE}/bot{bot_token}/removeMyProfilePhoto"
             resp = cls._post(url, json={}, timeout=10)
@@ -387,7 +358,7 @@ class TelegramBotGateway:
 
             # If background poller is already running for this bot token, skip duplicate getUpdates to prevent 409 Conflict
             from .poller import AutoPollerEngine
-            if not cls._is_test_environment() and AutoPollerEngine.is_bot_polling(bot_token):
+            if AutoPollerEngine.is_bot_polling(bot_token):
                 logger.debug(f"[Telegram Gateway] Bot is already actively polled by AutoPollerEngine; skipping duplicate getUpdates.")
                 return {
                     "status": "success",
@@ -396,18 +367,6 @@ class TelegramBotGateway:
                     "new_messages": 0,
                     "last_update_id": cls._last_update_ids.get(bot_token, cls._last_update_id),
                     "is_active_poller": True
-                }
-
-            # In automated tests without requests mock, avoid making live network requests
-            if cls._is_test_environment() and not cls._is_callable_mocked(requests.get):
-                logger.info("[Telegram Gateway] Unmocked test environment, skipping live network request.")
-                return {
-                    "status": "offline_or_failed",
-                    "synced_users": 0,
-                    "synced_messages": 0,
-                    "new_messages": 0,
-                    "last_update_id": cls._last_update_id,
-                    "error": "Unmocked test environment"
                 }
 
             current_offset = cls._last_update_ids.get(bot_token, cls._last_update_id)
@@ -583,11 +542,6 @@ class TelegramBotGateway:
         if text and len(text) > 4096:
             logger.warning(f"[Telegram Gateway] Text length ({len(text)}) exceeds 4096 characters, truncating.")
             text = text[:4096]
-
-        # In automated tests without requests mock, avoid making live network requests
-        if cls._is_test_environment() and not cls._is_callable_mocked(requests.post):
-            logger.info("[Telegram Gateway] Unmocked test runner in send_telegram_message, running in simulated mode.")
-            return {"ok": True, "result": {"message_id": 99999, "simulated": True}}
 
         # Defensive type guard for media and sticker
         media_dict = media if isinstance(media, dict) else None
@@ -860,20 +814,6 @@ class TelegramBotGateway:
         Dispatches message to Telegram in a high-priority background worker thread without blocking caller.
         Provides sub-millisecond response time back to web and websocket clients.
         """
-        # In test environments, run synchronously so unit test mocks verify calls immediately
-        if cls._is_test_environment():
-            return cls.send_telegram_message(
-                bot_token=bot_token,
-                chat_id=chat_id,
-                text=text,
-                media=media,
-                sticker=sticker,
-                action=action,
-                operator_id=operator_id,
-                reply_markup=reply_markup,
-                album=album
-            )
-
         def _worker():
             try:
                 res = cls.send_telegram_message(
@@ -949,15 +889,6 @@ class TelegramBotGateway:
         """
         Asynchronously sets reaction on Telegram message.
         """
-        if cls._is_test_environment():
-            return cls.set_message_reaction(
-                bot_token=bot_token,
-                chat_id=chat_id,
-                message_id=message_id,
-                emoji=emoji,
-                operator_id=operator_id
-            )
-
         def _worker():
             try:
                 cls.set_message_reaction(
@@ -1019,14 +950,6 @@ class TelegramBotGateway:
         """
         Asynchronously deletes a message in Telegram.
         """
-        if cls._is_test_environment():
-            return cls.delete_message(
-                bot_token=bot_token,
-                chat_id=chat_id,
-                message_id=message_id,
-                operator_id=operator_id
-            )
-
         def _worker():
             try:
                 cls.delete_message(
@@ -1287,19 +1210,18 @@ class TelegramBotGateway:
                 if isinstance(last_photo, dict):
                     file_id = str(last_photo.get('file_id', '') or '')
             if bot_token and file_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = cls._get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': file_id},
-                            timeout=4
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching photo file path: {e}")
+                try:
+                    f_res = cls._get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': file_id},
+                        timeout=4
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching photo file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
@@ -1312,19 +1234,18 @@ class TelegramBotGateway:
             file_id = str(voice_info.get('file_id', '') or '')
             media_duration = voice_info.get('duration', 0) or 0
             if bot_token and file_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = cls._get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': file_id},
-                            timeout=4
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching voice file path: {e}")
+                try:
+                    f_res = cls._get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': file_id},
+                        timeout=4
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching voice file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
@@ -1338,19 +1259,18 @@ class TelegramBotGateway:
             media_duration = video_info.get('duration', 0) or 0
             media_filename = video_info.get('file_name', 'video.mp4') or 'video.mp4'
             if bot_token and file_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = cls._get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': file_id},
-                            timeout=4
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching video file path: {e}")
+                try:
+                    f_res = cls._get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': file_id},
+                        timeout=4
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching video file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
@@ -1364,19 +1284,18 @@ class TelegramBotGateway:
             media_duration = audio_info.get('duration', 0) or 0
             media_filename = audio_info.get('file_name', 'audio.mp3') or 'audio.mp3'
             if bot_token and file_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = cls._get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': file_id},
-                            timeout=4
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching audio file path: {e}")
+                try:
+                    f_res = cls._get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': file_id},
+                        timeout=4
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching audio file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
@@ -1389,19 +1308,18 @@ class TelegramBotGateway:
             file_id = str(doc_info.get('file_id', '') or '')
             media_filename = doc_info.get('file_name', 'document') or 'document'
             if bot_token and file_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = cls._get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': file_id},
-                            timeout=4
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching document file path: {e}")
+                try:
+                    f_res = cls._get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': file_id},
+                        timeout=4
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching document file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{file_id}" if bot_token and file_id else ""
             if not text_content:
@@ -1415,19 +1333,18 @@ class TelegramBotGateway:
             sticker_pack = sticker_info.get('set_name', '') or ''
             media_type = 'sticker'
             if bot_token and sticker_id:
-                if not (cls._is_test_environment() and not cls._is_callable_mocked(requests.get)):
-                    try:
-                        f_res = requests.get(
-                            f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
-                            params={'file_id': sticker_id},
-                            timeout=5
-                        ).json()
-                        if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
-                            file_path = f_res['result'].get('file_path')
-                            if file_path:
-                                media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
-                    except Exception as e:
-                        logger.warning(f"Error fetching sticker file path: {e}")
+                try:
+                    f_res = requests.get(
+                        f"{TELEGRAM_API_BASE}/bot{bot_token}/getFile",
+                        params={'file_id': sticker_id},
+                        timeout=5
+                    ).json()
+                    if isinstance(f_res, dict) and f_res.get('ok') and isinstance(f_res.get('result'), dict):
+                        file_path = f_res['result'].get('file_path')
+                        if file_path:
+                            media_url = f"{TELEGRAM_API_BASE}/file/bot{bot_token}/{file_path}"
+                except Exception as e:
+                    logger.warning(f"Error fetching sticker file path: {e}")
             if not media_url:
                 media_url = f"https://api.telegram.org/file/bot{bot_token}/{sticker_id}" if bot_token and sticker_id else ""
             if not text_content:
