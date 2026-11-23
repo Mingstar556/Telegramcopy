@@ -33,7 +33,7 @@ class RawTextParser(BaseParser):
         except Exception:
             return ''
 
-from .models import EmployeeAccount, DeviceSession, BotAccount, TelegramUser, ChatMessage
+from .models import EmployeeAccount, DeviceSession, BotAccount, TelegramUser, ChatMessage, MediaAsset
 from .serializers import format_message_dict, format_user_dict
 from .bot_service import TelegramBotGateway
 
@@ -1032,11 +1032,69 @@ def media_upload(request):
             logger.debug(f"[Server Image Optimizer] {opt_err}")
 
     media_url = request.build_absolute_uri(f"{settings.MEDIA_URL}uploads/{filename}")
+
+    # Register in MediaAsset cache for instant SHA-256 deduplication
+    file_hash = request.data.get('file_hash')
+    preview_blur = request.data.get('preview_blur')
+    waveform = request.data.get('waveform')
+
+    if file_hash:
+        try:
+            m_type = 'photo'
+            if ext_lower in ['.mp4', '.mov', '.webm', '.mkv', '.avi']:
+                m_type = 'video'
+            elif ext_lower in ['.mp3', '.ogg', '.wav', '.m4a', '.opus']:
+                m_type = 'voice'
+            elif ext_lower not in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                m_type = 'file'
+
+            MediaAsset.objects.update_or_create(
+                file_hash=file_hash,
+                defaults={
+                    'media_url': media_url,
+                    'media_type': m_type,
+                    'file_name': safe_name,
+                    'file_size': file_obj.size,
+                    'preview_blur': preview_blur,
+                    'waveform': waveform if isinstance(waveform, list) else None,
+                }
+            )
+        except Exception as e:
+            logger.debug(f"[MediaAsset Cache Save] {e}")
+
     return Response({
         "success": True,
         "url": media_url,
-        "filename": filename
+        "filename": filename,
+        "file_hash": file_hash,
+        "preview_blur": preview_blur
     })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def check_media_hash(request):
+    """
+    Check if a file with the given SHA-256 hash already exists on server.
+    Enables instant client-side upload skipping (0 byte transfer).
+    """
+    file_hash = request.data.get('file_hash')
+    if not file_hash:
+        return Response({'exists': False, 'detail': 'file_hash required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    asset = MediaAsset.objects.filter(file_hash=file_hash).first()
+    if asset:
+        return Response({
+            'exists': True,
+            'url': asset.media_url,
+            'media_type': asset.media_type,
+            'file_name': asset.file_name,
+            'file_size': asset.file_size,
+            'preview_blur': asset.preview_blur,
+            'waveform': asset.waveform
+        })
+
+    return Response({'exists': False})
 
 
 _webhook_worker_pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix='tg_webhook_worker')

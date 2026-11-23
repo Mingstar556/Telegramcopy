@@ -158,11 +158,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
     }
   };
 
-  const fillTestCredentials = (uid: string, pass: string) => {
-    setNewUserId(uid);
-    setNewPassword(pass);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
       <div
@@ -457,27 +452,6 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
                     className="w-full bg-transparent border-0 outline-none text-xs text-white"
                   />
                 </div>
-              </div>
-            </div>
-
-            {/* Quick Demo Helper */}
-            <div className="p-3 rounded-2xl bg-black/30 border border-white/5 text-[11px]">
-              <span className="text-zinc-400">Quick Test Credentials:</span>
-              <div className="flex gap-2 mt-1.5">
-                <button
-                  type="button"
-                  onClick={() => fillTestCredentials('1234', '1234')}
-                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 font-mono text-zinc-300"
-                >
-                  UID: 1234
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillTestCredentials('bot_89201948', 'django_secret_pass')}
-                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 font-mono text-zinc-300"
-                >
-                  Django Bot
-                </button>
               </div>
             </div>
 

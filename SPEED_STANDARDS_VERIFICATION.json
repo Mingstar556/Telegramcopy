@@ -1,0 +1,29 @@
+{
+  "plain_text": {
+    "avg_ms": 27.76,
+    "min_ms": 13.9,
+    "p50_ms": 25.93,
+    "p95_ms": 43.34,
+    "max_ms": 43.34
+  },
+  "typing_and_receipts": {
+    "avg_ms": 38.79,
+    "min_ms": 26.93,
+    "p50_ms": 40.81,
+    "p95_ms": 46.96,
+    "max_ms": 46.96
+  },
+  "media_upload_1mb": {
+    "payload_size_bytes": 1048576,
+    "avg_ms": 108.16,
+    "min_ms": 88.33,
+    "p50_ms": 101.63,
+    "max_ms": 145.42
+  },
+  "cold_start": {
+    "avg_ms": 922.35,
+    "p50_ms": 904.52,
+    "min_ms": 860.79,
+    "max_ms": 988.71
+  }
+}

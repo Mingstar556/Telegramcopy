@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
+import { resolveMediaUrl } from '../../services/api';
+
 interface VoiceMessagePlayerProps {
   audioUrl: string;
   duration?: number;
@@ -25,7 +27,10 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
   const [audioDuration, setAudioDuration] = useState(duration > 0 ? duration : 3);
 
   useEffect(() => {
-    const audio = new Audio(audioUrl);
+    const resolved = resolveMediaUrl(audioUrl);
+    const audio = new Audio(resolved);
+    audio.crossOrigin = 'anonymous';
+    audio.preload = 'metadata';
     audioRef.current = audio;
 
     const handleLoadedMetadata = () => {

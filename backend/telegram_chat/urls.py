@@ -13,6 +13,7 @@ urlpatterns = [
     path('messages/send/', views.send_message, name='send_message'),
     path('messages/delete/', views.delete_message_view, name='delete_message'),
     path('media/upload/', views.media_upload, name='media_upload'),
+    path('media/check-hash/', views.check_media_hash, name='check_media_hash'),
     path('telegram/sync/', views.sync_telegram_view, name='sync_telegram'),
     path('telegram/webhook/', views.telegram_webhook, name='telegram_webhook_default'),
     path('telegram/webhook/<str:user_id>/', views.telegram_webhook, name='telegram_webhook'),

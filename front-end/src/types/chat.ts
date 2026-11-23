@@ -22,6 +22,9 @@ export interface MediaItem {
   fileSize?: string;
   thumbnailUrl?: string;
   mimeType?: string;
+  preview_blur?: string;
+  waveform?: number[];
+  file_hash?: string;
 }
 
 export interface MessageReaction {
@@ -42,6 +45,8 @@ export interface InlineKeyboardMarkup {
 
 export interface ChatMessage {
   id: string;
+  seqno?: number;
+  pts?: number;
   senderId: string;
   senderName?: string;
   senderAvatar?: string;
@@ -50,7 +55,10 @@ export interface ChatMessage {
   timestamp: number;
   isOutgoing: boolean; // true if sent by the bot (logged-in user)
   status: 'pending' | 'sent' | 'delivered' | 'read';
-  action?: 'send_message' | 'send_sticker' | 'send_media' | 'send_photo' | 'send_video' | 'send_file' | 'typing' | 'status_check' | 'reaction' | 'delete_message';
+  action?: 'send_message' | 'send_sticker' | 'send_media' | 'send_photo' | 'send_video' | 'send_file' | 'typing' | 'status_check' | 'reaction' | 'delete_message' | 'read_receipt';
+  file_hash?: string;
+  preview_blur?: string;
+  waveform?: number[];
   sticker?: {
     id: string;
     packId: string;

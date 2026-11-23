@@ -14,7 +14,7 @@ import { useAuth } from './AuthContext';
 import { useTheme } from './ThemeContext';
 import { useNotification } from './NotificationContext';
 import { getStoredItem, setStoredItem } from '../utils/storage';
-import { compressImage, svgToPngDataUrl } from '../utils/imageCompressor';
+import { compressImage, svgToPngDataUrl, computeFileHash, generateMicroBlurThumbnail } from '../utils/imageCompressor';
 
 interface ChatContextValue {
   conversations: ChatConversation[];
@@ -446,12 +446,56 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = wsService.onMessage((incomingMsg) => {
       const chatId = incomingMsg.isOutgoing ? incomingMsg.toUser : incomingMsg.senderId;
 
-      if (incomingMsg.action === 'typing') {
-        setTypingChatIds(prev => ({ ...prev, [chatId]: true }));
-        setTimeout(() => {
-          setTypingChatIds(prev => ({ ...prev, [chatId]: false }));
-        }, 3000);
+      // Handle server ACK or status update
+      if (incomingMsg.action === 'status_check' && incomingMsg.id) {
+        setMessagesByChat(prev => {
+          const chatMsgs = prev[chatId] || [];
+          const idx = chatMsgs.findIndex(m => m.id === incomingMsg.id);
+          if (idx >= 0) {
+            const updated = [...chatMsgs];
+            updated[idx] = {
+              ...updated[idx],
+              status: incomingMsg.status || 'sent',
+              seqno: incomingMsg.seqno || updated[idx].seqno,
+              pts: incomingMsg.pts || updated[idx].pts
+            };
+            return { ...prev, [chatId]: updated };
+          }
+          return prev;
+        });
         return;
+      }
+
+      // Handle lightweight read receipt broadcast
+      if (incomingMsg.action === 'read_receipt') {
+        const targetChatId = (incomingMsg as any).toUser || (incomingMsg as any)['to-user'] || chatId;
+        const maxSeq = (incomingMsg as any).max_seq || (incomingMsg as any).seqno || 0;
+        setMessagesByChat(prev => {
+          const chatMsgs = prev[targetChatId] || [];
+          const updated = chatMsgs.map(m => {
+            if (m.isOutgoing && (maxSeq === 0 || (m.seqno && m.seqno <= maxSeq))) {
+              return { ...m, status: 'read' as const };
+            }
+            return m;
+          });
+          return { ...prev, [targetChatId]: updated };
+        });
+        return;
+      }
+
+      // Background prefetching for incoming voice notes and small photos (< 500 KB)
+      if (!incomingMsg.isOutgoing && incomingMsg.media?.url) {
+        try {
+          const mediaUrl = incomingMsg.media.url;
+          if (incomingMsg.media.type === 'photo') {
+            const imgPre = new Image();
+            imgPre.src = mediaUrl;
+          } else if (incomingMsg.media.type === 'voice') {
+            fetch(mediaUrl, { mode: 'cors' }).catch(() => {});
+          }
+        } catch (e) {
+          // ignore prefetch errors
+        }
       }
 
       // Handle real-time delete_message: remove message from feed across tabs and devices
@@ -1143,15 +1187,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let finalFileOrBlob = fileOrUrl;
     let previewDataUrl: string | undefined = undefined;
+    let fileHash: string | undefined = undefined;
+    let microBlur: string | undefined = undefined;
 
-    // Automatic Client-Side Image Compression for Photos
+    // Automatic Client-Side Image Compression & Micro Blur for Photos
     if (type === 'photo' && fileOrUrl instanceof File) {
       try {
-        const compressed = await compressImage(fileOrUrl, 1600, 1600, 0.82);
+        const [compressed, blur, hash] = await Promise.all([
+          compressImage(fileOrUrl, 1600, 1600, 0.82),
+          generateMicroBlurThumbnail(fileOrUrl),
+          computeFileHash(fileOrUrl)
+        ]);
         finalFileOrBlob = compressed.file;
         previewDataUrl = compressed.previewUrl;
+        microBlur = blur;
+        fileHash = hash;
       } catch (err) {
         console.warn('Image compression bypassed:', err);
+      }
+    } else if (fileOrUrl instanceof File || fileOrUrl instanceof Blob) {
+      try {
+        fileHash = await computeFileHash(fileOrUrl);
+      } catch (e) {
+        // ignore hash error
       }
     }
 
@@ -1163,13 +1221,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ? undefined
       : (finalFileOrBlob as File).name || (type === 'voice' ? 'voice.webm' : type === 'photo' ? 'photo.jpg' : type === 'video' ? 'video.mp4' : 'document.bin'));
 
-    // Upload to server if live backend
-    if (typeof finalFileOrBlob !== 'string') {
+    // Check media deduplication cache before uploading
+    let alreadyUploaded = false;
+    if (fileHash && typeof finalFileOrBlob !== 'string') {
+      try {
+        const hashCheck = await api.checkMediaHash(fileHash);
+        if (hashCheck?.exists && hashCheck.url) {
+          mediaUrl = hashCheck.url;
+          alreadyUploaded = true;
+          if (hashCheck.preview_blur && !microBlur) microBlur = hashCheck.preview_blur;
+        }
+      } catch (e) {
+        // ignore check error
+      }
+    }
+
+    // Upload to server if not deduplicated and live backend
+    if (!alreadyUploaded && typeof finalFileOrBlob !== 'string') {
       try {
         const uploadRes = await api.uploadMedia(
           finalFileOrBlob,
           resolvedFileName || (type === 'video' ? 'video.mp4' : 'upload'),
-          token || undefined
+          token || undefined,
+          { file_hash: fileHash, preview_blur: microBlur }
         );
         if (uploadRes?.url) {
           mediaUrl = uploadRes.url;
@@ -1191,12 +1265,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isOutgoing: true,
       status: 'pending',
       action: actionType,
+      file_hash: fileHash,
+      preview_blur: microBlur,
       media: {
         type,
         url: mediaUrl,
         duration,
         fileName: resolvedFileName,
-        fileSize
+        fileSize,
+        preview_blur: microBlur,
+        file_hash: fileHash
       }
     };
 

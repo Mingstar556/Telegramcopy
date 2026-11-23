@@ -74,8 +74,22 @@ class WebSocketService {
             return;
           }
 
-          // Handle server ACK
+          // Handle server Quick ACK with seqno / pts
           if (data.action === 'ack') {
+            if (data.id && (data.seqno || data.status)) {
+              this.notifyMessage({
+                id: data.id,
+                seqno: data.seqno || data.pts,
+                pts: data.pts || data.seqno,
+                senderId: userId,
+                toUser: '',
+                message: '',
+                timestamp: Date.now(),
+                isOutgoing: true,
+                status: (data.status === 'sent' ? 'sent' : 'delivered'),
+                action: 'status_check'
+              });
+            }
             return;
           }
 
@@ -87,6 +101,8 @@ class WebSocketService {
           const rawAlbum = data.album;
           const incomingMessage: ChatMessage = {
             id: data.id || 'ws_' + Date.now(),
+            seqno: data.seqno || data.pts,
+            pts: data.pts || data.seqno,
             senderId: isOutgoing ? userId : (data["sender_id"] || data["from_user"] || data["to-user"] || data.userId),
             senderName: data.sender_name,
             senderAvatar: resolveMediaUrl(data.sender_avatar || data.senderAvatar || data.avatar),
@@ -96,6 +112,9 @@ class WebSocketService {
             isOutgoing,
             status: data.status || 'delivered',
             action: data.action,
+            file_hash: data.file_hash || (rawMedia && rawMedia.file_hash),
+            preview_blur: data.preview_blur || (rawMedia && rawMedia.preview_blur),
+            waveform: data.waveform || (rawMedia && rawMedia.waveform),
             reaction: data.reaction || (data.messageId ? {
               message_id: data.messageId,
               emoji: data.emoji || data.message || '',

@@ -37,7 +37,8 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
     clearChat,
     deleteChat,
     openSavedMessages,
-    openCreateInlineButton
+    openCreateInlineButton,
+    wipeAllChats
   } = useChat();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -233,6 +234,25 @@ export const ThreeDotsMenu: React.FC<ThreeDotsMenuProps> = ({
         </div>
         <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--color-accent)]/15 border border-[var(--color-accent)]/30 text-[var(--color-accent)] font-mono font-bold">
           Bot
+        </span>
+      </button>
+
+      {/* Wipe All Chats */}
+      <button
+        onClick={() => {
+          onClose();
+          if (window.confirm('Wipe and delete ALL chatting history and files? This action is permanent.')) {
+            wipeAllChats();
+          }
+        }}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors btn-press text-left"
+      >
+        <div className="flex items-center gap-3">
+          <Trash2 className="w-4 h-4 text-red-400" />
+          <span>Wipe All Chats</span>
+        </div>
+        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 font-mono font-bold">
+          Clean
         </span>
       </button>
 

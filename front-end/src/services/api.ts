@@ -330,13 +330,41 @@ class ApiService {
   }
 
   /**
-   * Upload media file (photo, video, voice note) to backend
+   * Check if media already exists on server by SHA-256 hash
    */
-  async uploadMedia(file: File | Blob, filename: string, token?: string): Promise<{ success: boolean; url: string }> {
+  async checkMediaHash(fileHash: string): Promise<{ exists: boolean; url?: string; preview_blur?: string; waveform?: number[] }> {
+    try {
+      const base = this.getBaseUrl();
+      const res = await fetch(`${base}/api/media/check-hash/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_hash: fileHash })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn('[checkMediaHash] lookup error:', e);
+    }
+    return { exists: false };
+  }
+
+  /**
+   * Upload media file (photo, video, voice note) to backend with deduplication support
+   */
+  async uploadMedia(
+    file: File | Blob,
+    filename: string,
+    token?: string,
+    meta?: { file_hash?: string; preview_blur?: string; waveform?: number[] }
+  ): Promise<{ success: boolean; url: string; preview_blur?: string; waveform?: number[] }> {
     try {
       const base = this.getBaseUrl();
       const formData = new FormData();
       formData.append('file', file, filename);
+      if (meta?.file_hash) formData.append('file_hash', meta.file_hash);
+      if (meta?.preview_blur) formData.append('preview_blur', meta.preview_blur);
+      if (meta?.waveform) formData.append('waveform', JSON.stringify(meta.waveform));
 
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -352,7 +380,7 @@ class ApiService {
       }
 
       const data = await res.json();
-      return { success: true, url: data.url };
+      return { success: true, url: data.url, preview_blur: data.preview_blur };
     } catch (err) {
       console.warn('Backend upload failed, falling back to local ObjectURL:', err);
       return { success: true, url: URL.createObjectURL(file) };

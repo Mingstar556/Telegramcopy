@@ -1,0 +1,165 @@
+{
+  "timestamp": "2026-11-23T15:26:55Z",
+  "initial_db_rows": 64,
+  "final_db_rows": 1334,
+  "net_db_written": 1270,
+  "results": [
+    {
+      "test": "1. Text Messages (10 workers, 100 msgs)",
+      "concurrency": 10,
+      "total": 100,
+      "duration_sec": 5.97,
+      "rps": 16.7,
+      "success_rate": 100.0,
+      "avg_ms": 592.1,
+      "p50_ms": 190.8,
+      "p95_ms": 2879.3,
+      "p99_ms": 4147.6,
+      "max_ms": 4147.6,
+      "status_codes": {
+        "200": 100
+      },
+      "error_count": 0
+    },
+    {
+      "test": "2. Text Messages (50 workers, 500 msgs)",
+      "concurrency": 50,
+      "total": 500,
+      "duration_sec": 8.41,
+      "rps": 59.5,
+      "success_rate": 100.0,
+      "avg_ms": 820.5,
+      "p50_ms": 813.1,
+      "p95_ms": 1080.6,
+      "p99_ms": 1132.4,
+      "max_ms": 1158.3,
+      "status_codes": {
+        "200": 500
+      },
+      "error_count": 0
+    },
+    {
+      "test": "3. Text Messages (100 workers, 1000 msgs)",
+      "concurrency": 100,
+      "total": 1000,
+      "duration_sec": 15.79,
+      "rps": 63.3,
+      "success_rate": 100.0,
+      "avg_ms": 1526.8,
+      "p50_ms": 1591.6,
+      "p95_ms": 1770.6,
+      "p99_ms": 1835.9,
+      "max_ms": 2133.7,
+      "status_codes": {
+        "200": 1000
+      },
+      "error_count": 0
+    },
+    {
+      "test": "4. Photo Media (50 workers, 300 photos)",
+      "concurrency": 50,
+      "total": 300,
+      "duration_sec": 6.56,
+      "rps": 45.7,
+      "success_rate": 100.0,
+      "avg_ms": 1064.3,
+      "p50_ms": 846.4,
+      "p95_ms": 2513.3,
+      "p99_ms": 2601.6,
+      "max_ms": 2617.0,
+      "status_codes": {
+        "200": 300
+      },
+      "error_count": 0
+    },
+    {
+      "test": "5. Video Media (50 workers, 300 videos)",
+      "concurrency": 50,
+      "total": 300,
+      "duration_sec": 5.91,
+      "rps": 50.8,
+      "success_rate": 100.0,
+      "avg_ms": 940.8,
+      "p50_ms": 843.2,
+      "p95_ms": 1318.1,
+      "p99_ms": 1376.3,
+      "max_ms": 1378.2,
+      "status_codes": {
+        "200": 300
+      },
+      "error_count": 0
+    },
+    {
+      "test": "Breaking Point Stress Test (Concurrency=150, Load=600)",
+      "concurrency": 150,
+      "total": 600,
+      "duration_sec": 8.4,
+      "rps": 71.4,
+      "success_rate": 94.2,
+      "avg_ms": 1865.4,
+      "p50_ms": 1802.0,
+      "p95_ms": 3053.8,
+      "p99_ms": 3519.4,
+      "max_ms": 3561.5,
+      "status_codes": {
+        "200": 565,
+        "0": 35
+      },
+      "error_count": 35
+    },
+    {
+      "test": "Breaking Point Stress Test (Concurrency=250, Load=1000)",
+      "concurrency": 250,
+      "total": 1000,
+      "duration_sec": 10.09,
+      "rps": 99.1,
+      "success_rate": 68.8,
+      "avg_ms": 2123.6,
+      "p50_ms": 2036.4,
+      "p95_ms": 3443.3,
+      "p99_ms": 3655.8,
+      "max_ms": 3774.8,
+      "status_codes": {
+        "200": 688,
+        "0": 312
+      },
+      "error_count": 312
+    },
+    {
+      "test": "Breaking Point Stress Test (Concurrency=400, Load=1600)",
+      "concurrency": 400,
+      "total": 1600,
+      "duration_sec": 10.81,
+      "rps": 148.1,
+      "success_rate": 47.7,
+      "avg_ms": 2157.3,
+      "p50_ms": 2036.7,
+      "p95_ms": 3391.5,
+      "p99_ms": 3604.0,
+      "max_ms": 3753.8,
+      "status_codes": {
+        "200": 763,
+        "0": 837
+      },
+      "error_count": 837
+    },
+    {
+      "test": "Breaking Point Stress Test (Concurrency=600, Load=2400)",
+      "concurrency": 600,
+      "total": 2400,
+      "duration_sec": 11.18,
+      "rps": 214.8,
+      "success_rate": 30.8,
+      "avg_ms": 2161.4,
+      "p50_ms": 2049.9,
+      "p95_ms": 3418.3,
+      "p99_ms": 3821.8,
+      "max_ms": 4047.7,
+      "status_codes": {
+        "200": 740,
+        "0": 1660
+      },
+      "error_count": 1660
+    }
+  ]
+}

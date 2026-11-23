@@ -3,6 +3,7 @@ import secrets
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
+from django.db.models import Q, Max
 from django.utils import timezone
 from .security import SecurityGuard
 
@@ -34,11 +35,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return False
 
     @database_sync_to_async
-    def save_outgoing_message(self, operator_id: str, to_user: str, text: str, action: str, sticker: dict = None, media: dict = None, album: list = None):
+    def save_outgoing_message(self, operator_id: str, to_user: str, text: str, action: str, sticker: dict = None, media: dict = None, album: list = None, file_hash: str = None, preview_blur: str = None, waveform: list = None):
         from telegram_chat.models import ChatMessage
+        from django.db.models import Max
         msg_uid = f"msg_{int(timezone.now().timestamp() * 1000)}_{secrets.token_hex(4)}"
+        # Sequence number allocation (pts/seqno) per chat
+        last_seq = ChatMessage.objects.filter(
+            Q(sender_id=operator_id, to_user=to_user) | Q(sender_id=to_user, to_user=operator_id)
+        ).aggregate(max_seq=Max('seqno'))['max_seq'] or 0
+        next_seq = last_seq + 1
+
         chat_msg = ChatMessage.objects.create(
             message_uid=msg_uid,
+            seqno=next_seq,
             sender_id=operator_id,
             to_user=to_user,
             message=text or "",
@@ -52,8 +61,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             sticker_id=sticker.get('id') if isinstance(sticker, dict) else None,
             sticker_pack=sticker.get('packId') or sticker.get('pack_id') if isinstance(sticker, dict) else None,
             sticker_emoji=sticker.get('emoji') if isinstance(sticker, dict) else None,
+            file_hash=file_hash or (media.get('file_hash') if isinstance(media, dict) else None),
+            preview_blur=preview_blur or (media.get('preview_blur') if isinstance(media, dict) else None),
+            waveform=waveform or (media.get('waveform') if isinstance(media, dict) else None),
         )
-        return msg_uid, chat_msg.id
+        return msg_uid, chat_msg.id, next_seq
 
     @database_sync_to_async
     def get_bot_token(self, operator_id: str):
@@ -317,6 +329,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 )
             return
 
+        # Handle lightweight read receipt broadcast
+        if action == 'read_receipt':
+            to_user = payload.get('to-user') or payload.get('to_user')
+            max_seq = payload.get('max_seq') or payload.get('seqno') or 0
+            if to_user:
+                await self.channel_layer.group_send(
+                    self.room_group,
+                    {
+                        "type": "chat_message",
+                        "data": {
+                            "action": "read_receipt",
+                            "to-user": to_user,
+                            "from_user": self.user_id,
+                            "max_seq": max_seq,
+                            "timestamp": int(timezone.now().timestamp() * 1000)
+                        }
+                    }
+                )
+            return
+
         to_user = payload.get('to-user') or payload.get('to_user') or payload.get('to_userid')
         text = payload.get('message', '')
         sticker = payload.get('sticker') if isinstance(payload.get('sticker'), dict) else None
@@ -325,6 +357,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             sticker['url'] = file_url
         media = payload.get('media') if isinstance(payload.get('media'), dict) else None
         album = payload.get('album') if isinstance(payload.get('album'), list) else None
+        file_hash = payload.get('file_hash') or (media.get('file_hash') if media else None)
+        preview_blur = payload.get('preview_blur') or (media.get('preview_blur') if media else None)
+        waveform = payload.get('waveform') or (media.get('waveform') if media else None)
 
         if not to_user:
             await self.send(text_data=json.dumps({
@@ -343,15 +378,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }))
             return
 
-        # 1. Instantly save to database
-        msg_uid, chat_msg_id = await self.save_outgoing_message(
+        # 1. Instantly save to database with seqno
+        msg_uid, chat_msg_id, seqno = await self.save_outgoing_message(
             operator_id=self.user_id,
             to_user=to_user,
             text=text,
             action=action,
             sticker=sticker,
             media=media,
-            album=album
+            album=album,
+            file_hash=file_hash,
+            preview_blur=preview_blur,
+            waveform=waveform
         )
 
         now_ms = int(timezone.now().timestamp() * 1000)
@@ -359,6 +397,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # 2. Immediately broadcast to operator group (< 5ms)
         event_data = {
             "id": msg_uid,
+            "seqno": seqno,
             "sender_id": self.user_id,
             "User-ID": self.user_id,
             "to-user": to_user,
@@ -374,6 +413,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             event_data["media"] = media
         if album:
             event_data["album"] = album
+        if file_hash:
+            event_data["file_hash"] = file_hash
+        if preview_blur:
+            event_data["preview_blur"] = preview_blur
+        if waveform:
+            event_data["waveform"] = waveform
 
         await self.channel_layer.group_send(
             self.room_group,
@@ -399,10 +444,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 album=album
             )
 
-        # 4. Immediate ACK to sender socket
+        # 4. Immediate Quick ACK to sender socket with seqno/pts
         await self.send(text_data=json.dumps({
             "action": "ack",
             "id": msg_uid,
+            "seqno": seqno,
+            "pts": seqno,
             "status": "sent"
         }))
 

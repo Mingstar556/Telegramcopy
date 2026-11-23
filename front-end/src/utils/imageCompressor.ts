@@ -290,3 +290,49 @@ export function optimizeFile(file: File): OptimizedFileResult {
     formattedSize: formatFileSize(file.size)
   };
 }
+
+/**
+ * Computes SHA-256 hash client-side for media deduplication.
+ * Skips re-uploading identical media across chats.
+ */
+export async function computeFileHash(file: File | Blob): Promise<string> {
+  try {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    console.warn('[computeFileHash] Fallback hash:', e);
+    return `${file.size}_${file.type}_${(file as File).name || 'blob'}`;
+  }
+}
+
+/**
+ * Generates an ultra-lightweight blurred preview data URI (~150-250 bytes)
+ * Embeds directly inside chat message payload for instant bubble rendering without network round-trip.
+ */
+export async function generateMicroBlurThumbnail(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) return '';
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const canvas = document.createElement('canvas');
+      canvas.width = 20;
+      canvas.height = 20;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve('');
+        return;
+      }
+      ctx.drawImage(img, 0, 0, 20, 20);
+      resolve(canvas.toDataURL('image/jpeg', 0.3));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve('');
+    };
+    img.src = objectUrl;
+  });
+}

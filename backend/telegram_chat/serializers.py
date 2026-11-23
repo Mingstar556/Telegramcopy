@@ -12,6 +12,8 @@ def format_message_dict(msg: ChatMessage) -> dict:
     """Format ChatMessage model into the React client's ChatMessage interface."""
     data = {
         'id': msg.message_uid,
+        'seqno': getattr(msg, 'seqno', None),
+        'pts': getattr(msg, 'seqno', None),
         'senderId': msg.sender_id,
         'senderName': msg.sender_name or '',
         'toUser': msg.to_user,
@@ -22,12 +24,22 @@ def format_message_dict(msg: ChatMessage) -> dict:
         'action': msg.action,
     }
 
+    if getattr(msg, 'file_hash', None):
+        data['file_hash'] = msg.file_hash
+    if getattr(msg, 'preview_blur', None):
+        data['preview_blur'] = msg.preview_blur
+    if getattr(msg, 'waveform', None):
+        data['waveform'] = msg.waveform
+
     if msg.media_type and msg.media_url:
         data['media'] = {
             'type': msg.media_type,
             'url': msg.media_url,
             'fileName': msg.media_filename or '',
             'duration': msg.media_duration or 0,
+            'preview_blur': getattr(msg, 'preview_blur', None),
+            'waveform': getattr(msg, 'waveform', None),
+            'file_hash': getattr(msg, 'file_hash', None),
         }
 
     if getattr(msg, 'media_group_id', None):

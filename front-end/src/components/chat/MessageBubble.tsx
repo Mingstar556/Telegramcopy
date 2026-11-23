@@ -623,7 +623,15 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({ message, onForwa
               }}
             >
               {!imgLoaded && (
-                <div className="absolute inset-0 min-h-[160px] skeleton-shimmer" />
+                message.preview_blur || message.media?.preview_blur ? (
+                  <img
+                    src={message.preview_blur || message.media?.preview_blur}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover filter blur-lg scale-110 opacity-75"
+                  />
+                ) : (
+                  <div className="absolute inset-0 min-h-[160px] skeleton-shimmer" />
+                )
               )}
               <img
                 src={resolveMediaUrl(message.media.url)}

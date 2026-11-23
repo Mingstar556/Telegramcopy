@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { resolveMediaUrl } from '../../services/api';
 
 export interface PhotoItem {
   url: string;
@@ -55,6 +56,7 @@ export const PhotoLightboxModal: React.FC<PhotoLightboxModalProps> = ({
   const currentPhoto = photos[currentIndex] || photos[0];
   const count = photos.length;
   const hasMultiple = count > 1;
+  const resolvedCurrentUrl = resolveMediaUrl(currentPhoto?.url);
 
   const handlePrev = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -91,7 +93,7 @@ export const PhotoLightboxModal: React.FC<PhotoLightboxModalProps> = ({
         {/* Action Controls */}
         <div className="flex items-center gap-2 ml-auto">
           <a
-            href={currentPhoto.url}
+            href={resolvedCurrentUrl}
             download={`photo_${currentIndex + 1}.jpg`}
             target="_blank"
             rel="noopener noreferrer"
@@ -102,7 +104,7 @@ export const PhotoLightboxModal: React.FC<PhotoLightboxModalProps> = ({
             <Download className="w-4 h-4" />
           </a>
           <a
-            href={currentPhoto.url}
+            href={resolvedCurrentUrl}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
@@ -155,9 +157,10 @@ export const PhotoLightboxModal: React.FC<PhotoLightboxModalProps> = ({
         {/* Centerpiece Image */}
         <div className="relative flex flex-col items-center justify-center max-w-full max-h-full">
           <img
-            key={currentPhoto.url}
-            src={currentPhoto.url}
+            key={resolvedCurrentUrl}
+            src={resolvedCurrentUrl}
             alt={currentPhoto.caption || `Photo ${currentIndex + 1}`}
+            crossOrigin="anonymous"
             className="max-w-[92vw] sm:max-w-[85vw] max-h-[72vh] sm:max-h-[78vh] object-contain rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10 animate-in zoom-in-95 duration-200 select-none"
           />
 
@@ -189,23 +192,26 @@ export const PhotoLightboxModal: React.FC<PhotoLightboxModalProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="max-w-[94vw] sm:max-w-2xl overflow-x-auto flex items-center gap-2 p-2 rounded-2xl bg-black/70 backdrop-blur-xl border border-white/10 shadow-2xl scrollbar-none">
-            {photos.map((p, pIdx) => (
-              <button
-                key={pIdx}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCurrentIndex(pIdx);
-                }}
-                className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden flex-shrink-0 transition-all duration-200 border-2 ${
-                  currentIndex === pIdx
-                    ? 'border-[var(--color-accent)] scale-105 shadow-lg opacity-100 ring-2 ring-[var(--color-accent)]/30'
-                    : 'border-transparent opacity-50 hover:opacity-90 hover:scale-102'
-                }`}
-              >
-                <img src={p.url} alt="" className="w-full h-full object-cover" />
-              </button>
-            ))}
+            {photos.map((p, pIdx) => {
+              const thumbUrl = resolveMediaUrl(p.url);
+              return (
+                <button
+                  key={pIdx}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentIndex(pIdx);
+                  }}
+                  className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden flex-shrink-0 transition-all duration-200 border-2 ${
+                    currentIndex === pIdx
+                      ? 'border-[var(--color-accent)] scale-105 shadow-lg opacity-100 ring-2 ring-[var(--color-accent)]/30'
+                      : 'border-transparent opacity-50 hover:opacity-90 hover:scale-102'
+                  }`}
+                >
+                  <img src={thumbUrl} alt="" crossOrigin="anonymous" className="w-full h-full object-cover" />
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : (
