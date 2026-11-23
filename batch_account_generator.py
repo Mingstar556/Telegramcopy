@@ -19,9 +19,15 @@ import argparse
 import datetime
 from typing import List, Dict, Any, Optional
 
-# Setup Django Environment
+# Setup Dynamic Django Environment Path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
+candidate_paths = [
+    os.path.join(BASE_DIR, 'backend'),
+    os.path.join(BASE_DIR, '..', 'TBOTchat-server', 'backend'),
+    os.path.join(BASE_DIR, '..', 'backend'),
+]
+BACKEND_DIR = next((p for p in candidate_paths if os.path.isdir(p)), os.path.join(BASE_DIR, 'backend'))
+
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
@@ -48,7 +54,7 @@ def probe_telegram_bot(token: str) -> Dict[str, Any]:
         "bot_id": bot_id,
         "first_name": f"Bot {bot_id or 'Operator'}",
         "username": f"bot_{bot_id or 'operator'}",
-        "avatar_url": "",
+        "avatar": "",
         "verified": False,
         "error": None
     }
@@ -58,273 +64,274 @@ def probe_telegram_bot(token: str) -> Dict[str, Any]:
         resp = requests.get(url, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            if data.get('ok') and isinstance(data.get('result'), dict):
-                r = data['result']
-                info["first_name"] = r.get('first_name') or info["first_name"]
-                info["username"] = r.get('username') or info["username"]
+            if data.get("ok") and isinstance(data.get("result"), dict):
+                res = data["result"]
+                info["first_name"] = res.get("first_name") or info["first_name"]
+                info["username"] = res.get("username") or info["username"]
                 info["verified"] = True
 
-                # Try fetching avatar
+                # Retrieve profile photo if available
                 try:
-                    photos_url = f"https://api.telegram.org/bot{token}/getUserProfilePhotos?user_id={bot_id}&limit=1"
-                    p_resp = requests.get(photos_url, timeout=4)
+                    p_url = f"https://api.telegram.org/bot{token}/getUserProfilePhotos"
+                    p_resp = requests.get(p_url, params={"limit": 1}, timeout=3)
                     if p_resp.status_code == 200:
                         p_data = p_resp.json()
-                        photos = p_data.get('result', {}).get('photos', [])
-                        if photos and photos[0]:
-                            file_id = photos[0][-1].get('file_id')
+                        photos = p_data.get("result", {}).get("photos", [])
+                        if photos and isinstance(photos[0], list) and photos[0]:
+                            file_id = photos[0][-1].get("file_id")
                             if file_id:
-                                f_resp = requests.get(f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}", timeout=4)
-                                if f_resp.status_code == 200 and f_resp.json().get('ok'):
-                                    file_path = f_resp.json()['result'].get('file_path')
-                                    if file_path:
-                                        info["avatar_url"] = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                                f_url = f"https://api.telegram.org/bot{token}/getFile"
+                                f_resp = requests.get(f_url, params={"file_id": file_id}, timeout=3)
+                                f_path = f_resp.json().get("result", {}).get("file_path")
+                                if f_path:
+                                    info["avatar"] = f"https://api.telegram.org/file/bot{token}/{f_path}"
                 except Exception:
                     pass
         else:
-            info["error"] = f"Telegram HTTP {resp.status_code}"
+            info["error"] = f"HTTP {resp.status_code}"
     except Exception as e:
-        info["error"] = str(e)[:60]
+        info["error"] = str(e)
 
     return info
 
 
-def generate_accounts(
+def generate_memorable_password() -> str:
+    """Generate clean, memorable password format: Word_Number (e.g., Tiger_9482)"""
+    adjectives = ["Fast", "Swift", "Bright", "Grand", "Super", "Alpha", "Hyper", "Prime", "Ultra", "Elite"]
+    nouns = ["Tiger", "Falcon", "Eagle", "Nova", "Pulse", "Storm", "Apex", "Orbit", "Shield", "Vanguard"]
+    adj = secrets.choice(adjectives)
+    noun = secrets.choice(nouns)
+    digits = f"{secrets.randbelow(9000) + 1000}"
+    return f"{adj}{noun}_{digits}"
+
+
+def generate_random_password(length: int = 14) -> str:
+    """Generate high-entropy random password with alphanumeric and punctuation characters."""
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def generate_accounts_for_tokens(
     tokens: List[str],
     id_prefix: str = "auto",
     password_type: str = "memorable",
-    custom_password: str = "",
-    overwrite: bool = True
+    custom_password: Optional[str] = None,
+    overwrite_existing: bool = True
 ) -> List[Dict[str, Any]]:
-    """Process a list of tokens and create corresponding web operator accounts."""
+    """Process a list of bot tokens and insert/update web operator accounts."""
     results = []
+    used_user_ids = set(EmployeeAccount.objects.values_list('user_id', flat=True))
 
-    for index, raw_token in enumerate(tokens, start=1):
-        token = raw_token.strip()
-        if not token:
+    for idx, raw_token in enumerate(tokens, start=1):
+        clean_token = raw_token.strip()
+        if not clean_token:
             continue
 
-        print(f"[*] Processing Token #{index} ({mask_sensitive_token(token)})...", end=" ", flush=True)
+        # Probe bot details via Telegram Bot API
+        probe = probe_telegram_bot(clean_token)
+        bot_id = probe["bot_id"] or f"{idx}"
+        bot_username = probe["username"]
+        bot_name = probe["first_name"]
+        avatar = probe["avatar"]
 
-        tg_info = probe_telegram_bot(token)
-        if tg_info["verified"]:
-            print(f"[VERIFIED: @{tg_info['username']}]")
-        else:
-            print(f"[OFFLINE/FALLBACK: {tg_info.get('error') or 'Unreachable'}]")
-
-        # Determine user_id
+        # Determine unique User-ID
         if id_prefix == "auto":
-            clean_username = re.sub(r'[^a-zA-Z0-9_]', '', tg_info['username'].lower())
-            candidate_id = clean_username or f"bot_{tg_info['bot_id'] or index}"
-        elif id_prefix.endswith("_") or id_prefix.endswith("-"):
-            candidate_id = f"{id_prefix}{index}"
+            candidate_id = re.sub(r'[^a-zA-Z0-9_-]', '', bot_username.lower())
+            if not candidate_id or len(candidate_id) < 3:
+                candidate_id = f"op_{bot_id}"
         else:
-            candidate_id = f"{id_prefix}_{index}"
+            candidate_id = f"{id_prefix}_{idx}"
 
         user_id = candidate_id
-        suffix_num = 1
-        while not overwrite and EmployeeAccount.objects.filter(user_id=user_id).exists():
-            user_id = f"{candidate_id}_{suffix_num}"
-            suffix_num += 1
+        counter = 1
+        while user_id in used_user_ids and not overwrite_existing:
+            user_id = f"{candidate_id}_{counter}"
+            counter += 1
+        used_user_ids.add(user_id)
 
         # Determine password
         if password_type == "custom" and custom_password:
             raw_password = custom_password
         elif password_type == "random":
-            raw_password = secrets.token_urlsafe(9)
+            raw_password = generate_random_password()
         else:
-            # Memorable 4-digit code e.g. BotPass_8421
-            raw_password = f"BotPass_{secrets.randbelow(9000) + 1000}"
+            raw_password = generate_memorable_password()
 
-        password_hash = make_password(raw_password)
+        hashed_password = make_password(raw_password)
 
-        # Database upsert
-        emp, emp_created = EmployeeAccount.objects.update_or_create(
+        # Upsert EmployeeAccount & BotAccount
+        employee, created = EmployeeAccount.objects.update_or_create(
             user_id=user_id,
             defaults={
-                'username': tg_info['first_name'],
-                'password': password_hash,
-                'avatar': tg_info['avatar_url'] or "",
-                'role': 'operator',
-                'is_active': True
+                "username": bot_name,
+                "password": hashed_password,
+                "role": "agent",
+                "is_active": True,
+                "avatar": avatar or None
             }
         )
 
-        bot, bot_created = BotAccount.objects.update_or_create(
+        bot_acc, b_created = BotAccount.objects.update_or_create(
             user_id=user_id,
             defaults={
-                'employee': emp,
-                'password': password_hash,
-                'bot_name': tg_info['first_name'],
-                'bot_username': tg_info['username'],
-                'bot_token': token,
-                'avatar': tg_info['avatar_url'] or "",
-                'description': f"Automated Web Operator linked to Telegram @{tg_info['username']}"
+                "employee": employee,
+                "bot_name": bot_name,
+                "bot_username": bot_username,
+                "bot_token": clean_token,
+                "password": hashed_password,
+                "avatar": avatar or None,
+                "description": f"Automated Web Operator linked to @{bot_username}"
             }
         )
 
         results.append({
-            "index": index,
+            "index": idx,
             "user_id": user_id,
             "password": raw_password,
-            "bot_name": tg_info['first_name'],
-            "bot_username": tg_info['username'],
-            "bot_token": token,
-            "bot_token_masked": mask_sensitive_token(token),
-            "status": "CREATED" if emp_created else "UPDATED",
-            "verified": "YES" if tg_info["verified"] else "NO"
+            "bot_name": bot_name,
+            "bot_username": f"@{bot_username}",
+            "bot_token": clean_token,
+            "bot_token_masked": mask_sensitive_token(clean_token),
+            "status": "Created" if created else "Updated",
+            "telegram_verified": probe["verified"]
         })
 
     return results
 
 
-def export_files(accounts: List[Dict[str, Any]]) -> Dict[str, str]:
-    """Export credentials to TXT and CSV files for distribution."""
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    txt_filename = f"generated_accounts_{timestamp}.txt"
-    csv_filename = f"generated_accounts_{timestamp}.csv"
+def export_results_to_files(results: List[Dict[str, Any]], out_dir: str = ".") -> Dict[str, str]:
+    """Save generated account credentials to timestamped TXT and CSV files."""
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    txt_path = os.path.join(out_dir, f"generated_accounts_{ts}.txt")
+    csv_path = os.path.join(out_dir, f"generated_accounts_{ts}.csv")
 
-    txt_path = os.path.join(BASE_DIR, txt_filename)
-    csv_path = os.path.join(BASE_DIR, csv_filename)
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("=" * 80 + "\n")
+        f.write("        TBOTCHAT WEB OPERATOR ACCOUNTS - CREDENTIALS SHEET\n")
+        f.write(f"        Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("=" * 80 + "\n\n")
 
-    # 1. Write TXT
-    with open(txt_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 75 + "\n")
-        f.write("             TELEGRAM WEB OPERATOR ACCOUNTS - CREDENTIAL LIST\n")
-        f.write(f" Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f" Total Accounts: {len(accounts)}\n")
-        f.write("=" * 75 + "\n\n")
+        for r in results:
+            f.write(f"[{r['index']}] {r['bot_name']} ({r['bot_username']})\n")
+            f.write(f"    User-ID : {r['user_id']}\n")
+            f.write(f"    Password: {r['password']}\n")
+            f.write(f"    Token   : {r['bot_token_masked']}\n")
+            f.write(f"    Verified: {'YES [Telegram Verified]' if r['telegram_verified'] else 'NO (Offline/Fallback)'}\n")
+            f.write("-" * 80 + "\n")
 
-        for acc in accounts:
-            f.write(f"Account #{acc['index']}:\n")
-            f.write(f"  * Web User-ID : {acc['user_id']}\n")
-            f.write(f"  * Web Password: {acc['password']}\n")
-            f.write(f"  * Bot Name    : {acc['bot_name']}\n")
-            f.write(f"  * Bot Username: @{acc['bot_username']}\n")
-            f.write(f"  * Telegram Key: {acc['bot_token']}\n")
-            f.write(f"  * Verified    : {acc['verified']}\n")
-            f.write("-" * 50 + "\n")
-
-    # 2. Write CSV
-    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Index", "User-ID", "Password", "Bot Name", "Bot Username", "Telegram Bot Key", "Status", "Verified"])
-        for acc in accounts:
+        writer.writerow(["Index", "User-ID", "Password", "Bot Name", "Bot Username", "Token Masked", "Telegram Verified"])
+        for r in results:
             writer.writerow([
-                acc["index"],
-                acc["user_id"],
-                acc["password"],
-                acc["bot_name"],
-                acc["bot_username"],
-                acc["bot_token"],
-                acc["status"],
-                acc["verified"]
+                r["index"],
+                r["user_id"],
+                r["password"],
+                r["bot_name"],
+                r["bot_username"],
+                r["bot_token_masked"],
+                r["telegram_verified"]
             ])
 
     return {"txt": txt_path, "csv": csv_path}
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate web operator accounts from Telegram bot keys.")
-    parser.add_argument('--count', type=int, help="Number of bot keys you want to configure.")
-    parser.add_argument('--tokens', type=str, help="Comma-separated or newline-separated bot tokens.")
-    parser.add_argument('--file', type=str, help="Path to text file containing bot tokens (one per line).")
-    parser.add_argument('--prefix', type=str, default="auto", help="User-ID prefix ('auto' uses bot username, or e.g. 'op_').")
-    parser.add_argument('--password-type', choices=['memorable', 'random', 'custom'], default='memorable', help="Password generation style.")
-    parser.add_argument('--custom-password', type=str, default="", help="Custom password if password-type=custom.")
+def interactive_prompt() -> None:
+    """Friendly interactive CLI wizard."""
+    print("=" * 72)
+    print("     TBOTCHAT AUTOMATIC BOT ACCOUNT GENERATOR WIZARD")
+    print("=" * 72)
+    print("This utility converts your Telegram Bot Tokens into ready-to-login")
+    print("web operator accounts for the customer service dashboard.\n")
 
-    args = parser.parse_args()
+    print("How would you like to provide the bot tokens?")
+    print("  [1] Enter token count, then paste each token one by one")
+    print("  [2] Bulk paste all tokens (empty line to finish)")
+    print("  [3] Load tokens from a file")
 
-    print("\n" + "=" * 70)
-    print("      TELEGRAM WEB OPERATOR ACCOUNT GENERATOR (ADMIN TOOL)")
-    print("=" * 70)
-
+    mode = input("\nSelect option [1/2/3] (default 1): ").strip() or "1"
     tokens = []
 
-    # Priority 1: CLI File
-    if args.file and os.path.exists(args.file):
-        with open(args.file, 'r', encoding='utf-8') as f:
-            tokens = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
-        print(f"[+] Loaded {len(tokens)} token(s) from file: {args.file}")
-
-    # Priority 2: CLI Tokens String
-    elif args.tokens:
-        tokens = [t.strip() for t in re.split(r'[,;\n]+', args.tokens) if t.strip()]
-        print(f"[+] Loaded {len(tokens)} token(s) from arguments.")
-
-    # Priority 3: Interactive Prompt
-    else:
-        print("\nHow many Telegram-Bot keys do you have?")
+    if mode == "1":
+        count_str = input("How many bot keys do you have? ").strip()
         try:
-            count_input = input("Enter count [e.g. 1, 3, 5] (or press Enter to paste keys directly): ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
-            sys.exit(0)
-
-        num_keys = 0
-        if count_input.isdigit():
-            num_keys = int(count_input)
-
-        print("\nPlease paste your Telegram Bot token(s):")
-        print("  - One token per line (format: 123456789:AAH...)")
-        print("  - When done, press Enter on an empty line.")
-        print("-" * 50)
-
+            count = max(1, int(count_str))
+        except ValueError:
+            count = 1
+        print(f"\nPlease enter your {count} Telegram Bot Token(s):")
+        for i in range(count):
+            t = input(f"  Token {i+1}/{count}: ").strip()
+            if t:
+                tokens.append(t)
+    elif mode == "2":
+        print("Paste your tokens below (one per line, finish with empty line):")
         while True:
-            try:
-                line = input(f"Key #{len(tokens) + 1}: " if num_keys and len(tokens) < num_keys else "Key (or Enter to finish): ").strip()
-                if not line:
-                    if num_keys and len(tokens) < num_keys:
-                        # User pressed enter early
-                        confirm = input(f"You entered {len(tokens)} of {num_keys} keys. Finish now? [y/N]: ").strip().lower()
-                        if confirm == 'y':
-                            break
-                        continue
-                    break
-                tokens.append(line)
-                if num_keys and len(tokens) >= num_keys:
-                    break
-            except (KeyboardInterrupt, EOFError):
+            line = input().strip()
+            if not line:
                 break
+            tokens.append(line)
+    elif mode == "3":
+        filepath = input("Enter path to file with tokens: ").strip()
+        if os.path.exists(filepath):
+            with open(filepath, "r", encoding="utf-8") as f:
+                tokens = [line.strip() for line in f if line.strip()]
+        else:
+            print(f"[!] File not found: {filepath}")
+            return
 
     if not tokens:
         print("[!] No tokens entered. Exiting.")
-        sys.exit(0)
+        return
 
-    print(f"\n[*] Starting account generation for {len(tokens)} Telegram bot key(s)...")
-    print("-" * 70)
+    print(f"\n[+] Loaded {len(tokens)} token(s). Processing...")
+    results = generate_accounts_for_tokens(tokens)
 
-    accounts = generate_accounts(
-        tokens=tokens,
-        id_prefix=args.prefix,
-        password_type=args.password_type,
-        custom_password=args.custom_password
-    )
-
-    if not accounts:
-        print("[!] No accounts generated.")
-        sys.exit(1)
-
+    # Print Summary Table
     print("\n" + "=" * 80)
-    print("                      GENERATED WEB OPERATOR ACCOUNTS")
-    print("=" * 80)
-    header = f"{'No':<4} | {'User-ID':<16} | {'Password':<14} | {'Bot Name':<18} | {'Username':<16} | {'Status':<7}"
-    print(header)
-    print("-" * len(header))
-
-    for a in accounts:
-        print(f"{a['index']:<4} | {a['user_id']:<16} | {a['password']:<14} | {a['bot_name'][:18]:<18} | {'@' + a['bot_username'][:15]:<16} | {a['status']:<7}")
-
+    print(f"{'User-ID':<20} | {'Password':<18} | {'Bot Name':<20} | Status")
+    print("-" * 80)
+    for r in results:
+        status = "Verified" if r['telegram_verified'] else "Offline"
+        print(f"{r['user_id']:<20} | {r['password']:<18} | {r['bot_name'][:18]:<20} | {status}")
     print("=" * 80)
 
     # Export to files
-    export_res = export_files(accounts)
-    print(f"\n[+] Credentials exported to files:")
-    print(f"    * Text File: {export_res['txt']}")
-    print(f"    * CSV File : {export_res['csv']}")
-    print("\n[✓] Web operators can now log into the web app using their User-ID and Password!")
-    print("    Server URL: http://127.0.0.1:8000 (or your configured server domain)")
+    out = export_results_to_files(results, out_dir=BASE_DIR)
+    print(f"\n[+] Credentials successfully exported to:")
+    print(f"    - TXT: {out['txt']}")
+    print(f"    - CSV: {out['csv']}")
+    print("\n[+] Operators can now immediately log in with these User-IDs and Passwords!")
 
 
-if __name__ == '__main__':
+def main():
+    parser = argparse.ArgumentParser(description="TBOTchat Automatic Bot Account Generator")
+    parser.add_argument("--tokens", nargs="+", help="One or more bot tokens separated by space")
+    parser.add_argument("--file", help="Path to text file containing tokens")
+    parser.add_argument("--prefix", default="auto", help="ID prefix: 'auto' or custom e.g. 'op'")
+    parser.add_argument("--password-type", default="memorable", choices=["memorable", "random", "custom"])
+    parser.add_argument("--custom-password", help="Custom password if password-type is custom")
+    parser.add_argument("--out", default=".", help="Directory to export output files")
+
+    args = parser.parse_args()
+
+    if args.tokens or args.file:
+        tokens = []
+        if args.tokens:
+            tokens.extend(args.tokens)
+        if args.file and os.path.exists(args.file):
+            with open(args.file, "r", encoding="utf-8") as f:
+                tokens.extend([line.strip() for line in f if line.strip()])
+        results = generate_accounts_for_tokens(
+            tokens=tokens,
+            id_prefix=args.prefix,
+            password_type=args.password_type,
+            custom_password=args.custom_password
+        )
+        export_results_to_files(results, out_dir=args.out)
+        print(f"Successfully generated {len(results)} accounts.")
+    else:
+        interactive_prompt()
+
+
+if __name__ == "__main__":
     main()

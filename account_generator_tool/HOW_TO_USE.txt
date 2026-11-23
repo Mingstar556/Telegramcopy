@@ -1,0 +1,32 @@
+=======================================================================
+TBOTCHAT - AUTOMATIC WEB OPERATOR ACCOUNT GENERATOR
+=======================================================================
+
+WHAT THIS TOOL DOES:
+--------------------
+When you have Telegram Bot tokens from @BotFather (e.g. 123456789:ABCDef...),
+this tool automatically creates corresponding web operator login credentials
+(User-ID & Password) so staff can immediately log in to the web app or desktop app.
+
+HOW TO USE (METHOD 1 - DOUBLE CLICK BATCH FILE):
+------------------------------------------------
+1. Double click GENERATE_ACCOUNTS.bat
+2. Select Option [1] (or Option [2] for bulk paste)
+3. Enter how many bot keys you have, then paste each key
+4. The tool connects to Telegram getMe, retrieves bot username & avatar,
+   creates the operator account in the database, and exports credentials:
+   - generated_accounts_<timestamp>.txt
+   - generated_accounts_<timestamp>.csv
+5. Give the User-ID and Password to your operators to log in!
+
+HOW TO USE (METHOD 2 - INSIDE THE WEB UI):
+------------------------------------------
+1. Open the login page in your browser or desktop app
+2. Click the link: "Admin Tool - Generate Bot Accounts"
+3. Paste all your bot tokens directly into the input area
+4. Click "Generate Web Accounts"
+5. Click "Export CSV", "Export TXT", or click "Log In Now" to test!
+
+CLI ADVANCED USAGE:
+-------------------
+..\TBOTchat-server\backend\venv\Scripts\python.exe batch_account_generator.py --tokens 1234:ABC 5678:DEF --prefix op --password-type memorable

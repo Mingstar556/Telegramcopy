@@ -13,6 +13,10 @@ echo.
 
 IF EXIST "backend\venv\Scripts\python.exe" (
     SET "PY_CMD=backend\venv\Scripts\python.exe"
+) ELSE IF EXIST "..\TBOTchat-server\backend\venv\Scripts\python.exe" (
+    SET "PY_CMD=..\TBOTchat-server\backend\venv\Scripts\python.exe"
+) ELSE IF EXIST "..\backend\venv\Scripts\python.exe" (
+    SET "PY_CMD=..\backend\venv\Scripts\python.exe"
 ) ELSE (
     SET "PY_CMD=python"
 )
