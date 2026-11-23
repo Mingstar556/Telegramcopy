@@ -1,0 +1,109 @@
+import React, { useState, useEffect } from 'react';
+import { Bookmark } from 'lucide-react';
+import { resolveMediaUrl } from '../../services/api';
+
+interface AvatarProps {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  isOnline?: boolean;
+  isSavedMessages?: boolean;
+  isGlow?: boolean;
+}
+
+const MODERN_GRADIENTS = [
+  'from-blue-600 to-cyan-500',
+  'from-emerald-500 to-teal-400',
+  'from-amber-500 to-orange-500',
+  'from-rose-500 to-pink-500',
+  'from-violet-600 to-purple-500',
+  'from-indigo-500 to-blue-500'
+];
+
+export const Avatar: React.FC<AvatarProps> = ({
+  id,
+  name,
+  avatarUrl,
+  size = 'md',
+  isOnline,
+  isSavedMessages,
+  isGlow = false
+}) => {
+  const [hasError, setHasError] = useState(false);
+  const resolvedUrl = resolveMediaUrl(avatarUrl);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [avatarUrl]);
+
+  const charCode = (id || name || 'A').charCodeAt(0);
+  const gradient = MODERN_GRADIENTS[charCode % MODERN_GRADIENTS.length];
+
+  const sizeClasses = {
+    sm: 'w-9 h-9 text-xs',
+    md: 'w-12 h-12 text-sm font-semibold',
+    lg: 'w-14 h-14 text-base font-bold',
+    xl: 'w-20 h-20 text-2xl font-bold'
+  }[size];
+
+  const initials = name
+    .split(' ')
+    .map(p => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'TG';
+
+  const iconSize = {
+    sm: 'w-4 h-4',
+    md: 'w-5 h-5',
+    lg: 'w-6 h-6',
+    xl: 'w-8 h-8'
+  }[size];
+
+  if (isSavedMessages || id === 'saved_messages') {
+    return (
+      <div className="relative inline-block flex-shrink-0 select-none">
+        <div
+          className={`${sizeClasses} rounded-full bg-gradient-to-tr from-[#229ad6] to-[#2aabee] text-white flex items-center justify-center shadow-md shadow-[#2aabee]/20 ring-1 ring-white/15`}
+        >
+          <Bookmark className={`${iconSize} fill-white stroke-[2.3]`} />
+        </div>
+      </div>
+    );
+  }
+
+  const showImage = Boolean(resolvedUrl && !hasError);
+
+  return (
+    <div className="relative inline-block flex-shrink-0 select-none">
+      {showImage ? (
+        <img
+          src={resolvedUrl}
+          alt={name}
+          loading="lazy"
+          className={`${sizeClasses} rounded-full object-cover transition-all duration-300 ${
+            isGlow ? 'unseen-avatar-ring' : 'ring-1 ring-white/10 shadow-sm'
+          }`}
+          onError={() => setHasError(true)}
+        />
+      ) : (
+        <div
+          className={`${sizeClasses} rounded-full bg-gradient-to-tr ${gradient} text-white flex items-center justify-center font-medium transition-all duration-300 ${
+            isGlow ? 'unseen-avatar-ring' : 'ring-1 ring-white/10 shadow-sm'
+          }`}
+        >
+          {initials}
+        </div>
+      )}
+
+      {isOnline && (
+        <span
+          className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[var(--color-bg-base)] rounded-full shadow-sm animate-soft-pulse"
+          title="Online"
+        />
+      )}
+    </div>
+  );
+};
