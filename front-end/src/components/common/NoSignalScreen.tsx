@@ -250,21 +250,29 @@ export const NoSignalScreen: React.FC<NoSignalScreenProps> = ({ onConnected, ini
             <div className="mt-4 p-4 rounded-xl bg-black/60 border border-zinc-700/60 text-xs text-zinc-300 space-y-3 animate-in fade-in duration-200">
               <div className="font-bold text-white flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-emerald-400" />
-                <span>To Host the Server & Database:</span>
+                <span>Network Reachability & Server Hosting Guide:</span>
               </div>
-              <div className="space-y-2 text-zinc-400 text-[11px] leading-relaxed">
+              <div className="space-y-2.5 text-zinc-400 text-[11px] leading-relaxed">
                 <div>
-                  <strong className="text-zinc-200">Option 1 (One-Click):</strong> Double-click the file <code className="text-yellow-400 font-mono bg-zinc-900 px-1.5 py-0.5 rounded">START_SERVER.bat</code> inside this application folder.
-                </div>
-                <div>
-                  <strong className="text-zinc-200">Option 2 (Terminal):</strong>
-                  <div className="mt-1 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 font-mono text-zinc-300 select-text overflow-x-auto">
-                    <div>cd backend</div>
-                    <div>python manage.py runserver 0.0.0.0:8000</div>
+                  <strong className="text-zinc-200">1. Production / Remote VPS (Recommended):</strong>
+                  <div className="text-zinc-400 mt-0.5">
+                    Point your domain (e.g. <code className="text-blue-300 font-mono">chat.company.com</code>) to your server's public IP. Nginx reverse-proxies port 443 (HTTPS/WSS) to Daphne.
                   </div>
                 </div>
-                <div className="text-emerald-400/90">
-                  ✓ As soon as the server starts, this window will automatically detect it and connect within 4 seconds!
+                <div>
+                  <strong className="text-zinc-200">2. Verify Reachability (PowerShell on Client):</strong>
+                  <div className="mt-1 bg-zinc-950 p-2 rounded-lg border border-zinc-800 font-mono text-emerald-400 select-text overflow-x-auto text-[10.5px]">
+                    Test-NetConnection {currentUrl.replace(/^https?:\/\//, '').split(':')[0] || 'chat.yourdomain.com'} -Port {currentUrl.startsWith('https://') ? '443' : '8000'}
+                  </div>
+                </div>
+                <div>
+                  <strong className="text-zinc-200">3. Local Development:</strong>
+                  <div className="mt-1 bg-zinc-950 p-2 rounded-lg border border-zinc-800 font-mono text-zinc-300 select-text overflow-x-auto text-[10.5px]">
+                    cd backend && python manage.py runserver 0.0.0.0:8000
+                  </div>
+                </div>
+                <div className="text-emerald-400/90 font-medium">
+                  ✓ Sockets reconnect with exponential backoff & jitter. Unsent messages buffer offline automatically.
                 </div>
               </div>
             </div>

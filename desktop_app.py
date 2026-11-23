@@ -182,10 +182,15 @@ class AppRequestHandler(SimpleHTTPRequestHandler):
                 if new_api:
                     # Normalize protocol
                     if not new_api.startswith('http://') and not new_api.startswith('https://'):
-                        if ':' in new_api:
-                            new_api = f"http://{new_api}"
-                        else:
+                        has_port = ':' in new_api
+                        import re
+                        is_ip_or_local = new_api.startswith('localhost') or bool(re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', new_api))
+                        if not has_port and not is_ip_or_local and '.' in new_api:
+                            new_api = f"https://{new_api}"
+                        elif not has_port:
                             new_api = f"http://{new_api}:8000"
+                        else:
+                            new_api = f"http://{new_api}"
                     new_api = new_api.rstrip('/')
                     
                     cfg = load_config()

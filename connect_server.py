@@ -44,8 +44,13 @@ def normalize_urls(raw_input):
 
     # Auto prefix protocol
     if not raw.startswith('http://') and not raw.startswith('https://'):
-        # Check if port specified
-        if ':' not in raw:
+        has_port = ':' in raw
+        # If domain name without explicit port, default to HTTPS / 443 standard
+        import re
+        is_ip_or_local = raw.startswith('localhost') or bool(re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', raw))
+        if not has_port and not is_ip_or_local and '.' in raw:
+            raw = f"https://{raw}"
+        elif not has_port:
             raw = f"http://{raw}:8000"
         else:
             raw = f"http://{raw}"

@@ -1,6 +1,43 @@
 import { BotAccount, LoginCredentials, GenerateAccountsPayload, GenerateAccountsResponse, GeneratedAccount } from '../types/auth';
 import { ChatConversation, ChatMessage, OutgoingBackendPayload } from '../types/chat';
 
+export function normalizeServerUrl(rawInput: string): { apiUrl: string; wsUrl: string } {
+  let raw = (rawInput || '').trim().replace(/\/+$/, '');
+  if (!raw) {
+    return {
+      apiUrl: 'http://127.0.0.1:8000',
+      wsUrl: 'ws://127.0.0.1:8000/ws/chat/'
+    };
+  }
+
+  // Auto-detect protocol if omitted
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    const isDomain = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?$/.test(raw);
+    const hasPort = /:\d+$/.test(raw);
+
+    if (isDomain && !hasPort) {
+      // Standard production TLS domain on port 443
+      raw = `https://${raw}`;
+    } else if (raw.includes('localhost') || /^(\d{1,3}\.){3}\d{1,3}/.test(raw)) {
+      raw = hasPort ? `http://${raw}` : `http://${raw}:8000`;
+    } else {
+      raw = `https://${raw}`;
+    }
+  }
+
+  const apiUrl = raw.replace(/\/+$/, '');
+  let wsUrl = '';
+  try {
+    const parsed = new URL(apiUrl);
+    const wsProto = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl = `${wsProto}//${parsed.host}/ws/chat/`;
+  } catch {
+    wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/chat/';
+  }
+
+  return { apiUrl, wsUrl };
+}
+
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('userbot_server_url');
@@ -8,19 +45,24 @@ export function getApiBaseUrl(): string {
     if ((window as any).__USERBOT_CONFIG__?.apiBaseUrl) {
       return (window as any).__USERBOT_CONFIG__.apiBaseUrl.replace(/\/+$/, '');
     }
-    // Dynamic network host detection: if accessed via LAN IP/hostname, point to that host on port 8000
+    // Web hosted via reverse proxy (Nginx / Cloudflare): use same origin
     if (window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      return `${window.location.protocol}//${window.location.hostname}:8000`;
+      if (window.location.port === '5173') {
+        return `${window.location.protocol}//${window.location.hostname}:8000`;
+      }
+      return window.location.origin;
     }
   }
   return import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 }
 
-export function setApiBaseUrl(url: string): void {
-  const clean = url.trim().replace(/\/+$/, '');
+export function setApiBaseUrl(url: string): { apiUrl: string; wsUrl: string } {
+  const { apiUrl, wsUrl } = normalizeServerUrl(url);
   if (typeof window !== 'undefined') {
-    localStorage.setItem('userbot_server_url', clean);
+    localStorage.setItem('userbot_server_url', apiUrl);
+    localStorage.setItem('userbot_ws_url', wsUrl);
   }
+  return { apiUrl, wsUrl };
 }
 
 export function getWsBaseUrl(): string {
@@ -37,6 +79,35 @@ export function getWsBaseUrl(): string {
     }
   }
   return import.meta.env.VITE_WS_BASE_URL || 'ws://127.0.0.1:8000/ws/chat/';
+}
+
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs: number = 8000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (init.signal) {
+    init.signal.addEventListener('abort', () => controller.abort());
+  }
+
+  try {
+    const res = await fetch(input, {
+      ...init,
+      signal: controller.signal
+    });
+    return res;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      const urlStr = typeof input === 'string' ? input : (input as any)?.url || 'endpoint';
+      throw new Error(`Connection timed out reaching ${urlStr} after ${timeoutMs / 1000}s. Check network, firewall or server.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function resolveMediaUrl(url?: string): string {
@@ -84,14 +155,9 @@ class ApiService {
   async checkHealth(): Promise<HealthCheckResult> {
     const base = this.getBaseUrl();
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-      const res = await fetch(`${base}/api/health/`, {
-        method: 'GET',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      const res = await fetchWithTimeout(`${base}/api/health/`, {
+        method: 'GET'
+      }, 4000);
 
       const data = await res.json().catch(() => ({}));
 
@@ -112,7 +178,7 @@ class ApiService {
         serverUrl: base
       };
     } catch (err: any) {
-      const isTimeout = err?.name === 'AbortError';
+      const isTimeout = err?.name === 'AbortError' || String(err?.message || '').includes('timed out');
       return {
         status: 'error',
         database: 'disconnected',
@@ -129,14 +195,14 @@ class ApiService {
    */
   async login(creds: LoginCredentials): Promise<{ account: BotAccount; token: string }> {
     const base = this.getBaseUrl();
-    const res = await fetch(`${base}/api/auth/login/`, {
+    const res = await fetchWithTimeout(`${base}/api/auth/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         "User-ID": creds.userId,
         password: creds.password
       })
-    });
+    }, 8000);
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
@@ -166,9 +232,9 @@ class ApiService {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${base}/api/user/profile/?User-ID=${encodeURIComponent(userId)}`, {
+    const res = await fetchWithTimeout(`${base}/api/user/profile/?User-ID=${encodeURIComponent(userId)}`, {
       headers
-    });
+    }, 8000);
 
     if (!res.ok) {
       throw new Error('Failed to fetch user data from Django');
@@ -197,11 +263,11 @@ class ApiService {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${base}/api/user/profile/avatar/`, {
+    const res = await fetchWithTimeout(`${base}/api/user/profile/avatar/`, {
       method: 'POST',
       headers,
       body: formData
-    });
+    }, 15000);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -224,10 +290,10 @@ class ApiService {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const userParam = userId ? `?User-ID=${encodeURIComponent(userId)}` : '';
 
-    const res = await fetch(`${base}/api/user/profile/avatar/${userParam}`, {
+    const res = await fetchWithTimeout(`${base}/api/user/profile/avatar/${userParam}`, {
       method: 'DELETE',
       headers
-    });
+    }, 8000);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -246,9 +312,9 @@ class ApiService {
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const syncParam = sync ? '&sync=true' : '';
-    const res = await fetch(`${base}/api/chats/?User-ID=${encodeURIComponent(userId)}${syncParam}`, {
+    const res = await fetchWithTimeout(`${base}/api/chats/?User-ID=${encodeURIComponent(userId)}${syncParam}`, {
       headers
-    });
+    }, 10000);
 
     if (!res.ok) {
       throw new Error('Failed to retrieve chat conversations');
@@ -280,9 +346,10 @@ class ApiService {
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${base}/api/messages/?User-ID=${encodeURIComponent(userId)}&to-user=${encodeURIComponent(toUser)}`,
-      { headers }
+      { headers },
+      10000
     );
 
     if (!res.ok) {
@@ -314,11 +381,11 @@ class ApiService {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(`${base}/api/messages/send/`, {
+    const res = await fetchWithTimeout(`${base}/api/messages/send/`, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload)
-    });
+    }, 8000);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -335,11 +402,11 @@ class ApiService {
   async checkMediaHash(fileHash: string): Promise<{ exists: boolean; url?: string; preview_blur?: string; waveform?: number[] }> {
     try {
       const base = this.getBaseUrl();
-      const res = await fetch(`${base}/api/media/check-hash/`, {
+      const res = await fetchWithTimeout(`${base}/api/media/check-hash/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_hash: fileHash })
-      });
+      }, 5000);
       if (res.ok) {
         return await res.json();
       }
@@ -369,11 +436,11 @@ class ApiService {
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`${base}/api/media/upload/`, {
+      const res = await fetchWithTimeout(`${base}/api/media/upload/`, {
         method: 'POST',
         headers,
         body: formData
-      });
+      }, 30000);
 
       if (!res.ok) {
         throw new Error('Upload failed');
@@ -427,11 +494,11 @@ class ApiService {
       });
     }
 
-    const res = await fetch(`${base}/api/send_photo/`, {
+    const res = await fetchWithTimeout(`${base}/api/send_photo/`, {
       method: 'POST',
       headers,
       body
-    });
+    }, 20000);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -448,7 +515,7 @@ class ApiService {
    */
   async generateBotAccounts(payload: GenerateAccountsPayload): Promise<GenerateAccountsResponse> {
     const base = this.getBaseUrl();
-    const res = await fetch(`${base}/api/admin/generate-accounts/`, {
+    const res = await fetchWithTimeout(`${base}/api/admin/generate-accounts/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -460,7 +527,7 @@ class ApiService {
         fetch_telegram_info: payload.fetchTelegramInfo ?? true,
         overwrite: payload.overwrite ?? true
       })
-    });
+    }, 15000);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -492,7 +559,7 @@ class ApiService {
   async deleteMessage(userId: string, chatId: string, messageId: string, deleteForEveryone: boolean = true): Promise<{ success: boolean }> {
     const base = this.getBaseUrl();
     try {
-      const res = await fetch(`${base}/api/messages/delete/`, {
+      const res = await fetchWithTimeout(`${base}/api/messages/delete/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -501,7 +568,7 @@ class ApiService {
           "message_id": messageId,
           "delete_for_everyone": deleteForEveryone
         })
-      });
+      }, 5000);
       return { success: res.ok };
     } catch {
       return { success: false };
@@ -510,7 +577,7 @@ class ApiService {
 
   async wipeChatHistory(userId: string, toUser?: string, wipeAll?: boolean, deleteChat?: boolean): Promise<{ success: boolean; deletedCount?: number }> {
     const base = this.getBaseUrl();
-    const res = await fetch(`${base}/api/chats/wipe/`, {
+    const res = await fetchWithTimeout(`${base}/api/chats/wipe/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -519,7 +586,7 @@ class ApiService {
         "wipe_all": wipeAll ?? false,
         "delete_chat": deleteChat ?? false
       })
-    });
+    }, 10000);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Failed to wipe chat history');
@@ -530,20 +597,24 @@ class ApiService {
 
   async listBotAccounts(): Promise<GeneratedAccount[]> {
     const base = this.getBaseUrl();
-    const res = await fetch(`${base}/api/admin/bot-accounts/`);
-    if (!res.ok) return [];
-    const data = await res.json().catch(() => ({}));
-    return (data.accounts || []).map((a: any) => ({
-      userId: a.user_id,
-      password: '***',
-      botName: a.bot_name,
-      botUsername: a.bot_username,
-      botToken: a.bot_token_masked,
-      botTokenMasked: a.bot_token_masked,
-      avatar: a.avatar,
-      status: a.is_active ? 'created' : 'updated',
-      telegramVerified: true
-    }));
+    try {
+      const res = await fetchWithTimeout(`${base}/api/admin/bot-accounts/`, {}, 6000);
+      if (!res.ok) return [];
+      const data = await res.json().catch(() => ({}));
+      return (data.accounts || []).map((a: any) => ({
+        userId: a.user_id,
+        password: '***',
+        botName: a.bot_name,
+        botUsername: a.bot_username,
+        botToken: a.bot_token_masked,
+        botTokenMasked: a.bot_token_masked,
+        avatar: a.avatar,
+        status: a.is_active ? 'created' : 'updated',
+        telegramVerified: true
+      }));
+    } catch {
+      return [];
+    }
   }
 }
 
